@@ -1,0 +1,15 @@
+{
+  "app": "丛林突击·第一关",
+  "version": "v1.0",
+  "androidVersionName": "1.0",
+  "package": "com.arcade.jungleassault",
+  "minAndroid": "8.0",
+  "bytes": 37735,
+  "sha256": "089acd9c84e08144fb28ce6cd5abde0e43e06cc9bc859c373b358127b25d93df",
+  "engineTests": "12/12 passed",
+  "browserSmoke": "passed",
+  "apkSignature": "v2 + v3 verified",
+  "zipalign": "passed",
+  "bundledAssets": "6/6 byte-identical",
+  "androidDeviceTest": "not run (no device or emulator available)"
+}

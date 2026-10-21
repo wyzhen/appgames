@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#091b21"><title>丛林突击 · 第一关</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="viewport">
+  <canvas id="game" width="960" height="540" aria-label="丛林突击游戏画面"></canvas>
+  <div class="vignette"></div>
+  <section id="menu" class="screen">
+    <div class="menu-shade"></div>
+    <div class="brand"><span class="mark">╱╱</span> JUNGLE ASSAULT <span class="tiny">ARCADE / 01</span></div>
+    <div class="menu-copy">
+      <div class="eyebrow"><span class="light"></span> 单人作战 · 离线街机</div>
+      <h1>丛林<span>突击</span><i>JUNGLE ASSAULT</i></h1>
+      <p class="intro">深入丛林，穿越火线。<br>向前推进，摧毁敌军基地核心。</p>
+      <div class="difficulty" role="group" aria-label="难度选择"><button class="selected" data-mode="classic">经典模式 <small>3 条生命</small></button><button data-mode="practice">练习模式 <small>8 条生命</small></button></div>
+      <div class="actions"><button id="start" class="primary">开始行动 <span>→</span></button><button id="help" class="secondary">操作指南</button></div>
+      <div class="menu-foot">原创像素画面与音乐 <b>•</b> 经典跑跳射击玩法</div>
+    </div>
+    <div class="mission"><span>MISSION</span><strong>01</strong><div>丛林前线</div><small>JUNGLE FRONTLINE</small></div>
+    <div class="level-route"><span class="route-point"></span><b>丛林入口</b><i></i><span>爆破木桥</span><i></i><span>基地核心</span><em>STAGE 01 / 01</em></div>
+    <button id="menu-mute" class="icon menu-mute" aria-label="静音切换">♫</button>
+  </section>
+  <section id="hud" hidden>
+    <div class="hud-left"><div class="hud-tag">1P <span id="life">◆ ◆ ◆</span></div><div class="score"><small>SCORE</small><b id="score">000000</b></div></div>
+    <div class="hud-center"><div><b id="sector">01 / 丛林入口</b><span id="progress-label">0%</span></div><div class="progress"><i id="progress"></i></div></div>
+    <div class="weapon"><span id="weapon-code">R</span><div><small>WEAPON</small><b id="weapon-name">突击步枪</b></div></div>
+    <button id="mute" class="icon" aria-label="静音切换">♫</button><button id="pause" class="icon" aria-label="暂停游戏">Ⅱ</button>
+    <div id="bossbar" hidden><div><b id="boss-label">基地防御系统</b><span id="boss-hp"></span></div><div class="boss-track"><i id="boss-health"></i></div></div>
+    <div id="notice"></div><div id="tutorial">方向键瞄准 / 移动 <b>·</b> 长按射击 <b>·</b> 下键俯卧</div>
+  </section>
+  <section id="touch" hidden aria-label="触屏控制">
+    <div id="dpad" aria-label="八方向移动与瞄准"><span class="up">▲</span><span class="down">▼</span><span class="left">◀</span><span class="right">▶</span><i id="thumb"></i></div>
+    <button id="jump" class="control" aria-label="跳跃"><b>A</b><small>跳跃</small></button>
+    <button id="fire" class="control" aria-label="射击"><b>B</b><small>射击</small></button>
+  </section>
+  <section id="dialog" class="screen modal" hidden><div class="modal-shade"></div><div class="dialog-card" id="dialog-card"></div></section>
+  <div id="rotate" hidden><b>↻</b><strong>横屏，开始行动</strong><span>请将手机横过来，获得更好的操作体验</span></div>
+</main>
+<script src="engine.js"></script><script src="renderer.js"></script><script src="audio.js"></script><script src="app.js"></script>
+</body></html>
