@@ -1,4 +1,4 @@
-/* Original, entirely synthesized arcade music and effects. No external audio. */
+/* Synthesized effects and optional user-supplied local background music. */
 (() => {
   'use strict';
   const midi = n => 440 * Math.pow(2, (n - 69) / 12);
@@ -13,23 +13,29 @@
       this.voices = new Set();
       this.lastEffects = Object.create(null);
       this.step = 0;
-      this.nextBeat = 0;
       this.timer = null;
-      this.tempo = 136;
-      // An original A-minor melody; each entry occupies one sixteenth note.
-      this.melody = [
-        76,0,79,0,81,0,76,0, 74,0,72,74,76,0,0,0,
-        76,0,79,81,84,0,81,0, 79,0,76,0,74,0,0,0,
-        72,0,76,0,79,0,76,0, 74,0,72,71,69,0,0,0,
-        71,0,74,0,76,0,79,0, 78,76,74,71,69,0,0,0
-      ];
-      this.bass = [45,45,45,45,41,41,43,43,45,45,45,45,41,43,40,40];
+      this.importedBuffer = null;
+      this.importedName = '';
+      this.musicError = '';
+      this.musicReady = false;
+      this.musicPersisted = false;
+      this.importing = false;
+      this._musicSource = null;
+      this._musicGain = null;
+      this._musicOffset = 0;
+      this._musicStartedAt = 0;
+      this._musicRevision = 0;
+      this._storageQueue = Promise.resolve();
+      this._dbPromise = null;
+      this._resumePromise = null;
+      // Restoring a file never starts playback without a later user gesture.
+      this.ready = this._restoreImportedMusic();
     }
 
-    unlock() {
+    _ensureContext() {
       if (!this.ctx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContext) return;
+        if (!AudioContext) return false;
         try {
           this.ctx = new AudioContext();
           this.master = this.ctx.createGain();
@@ -47,20 +53,39 @@
             seed = (seed * 16807) % 2147483647;
             samples[i] = (seed / 1073741824) - 1;
           }
-        } catch (_) { this.ctx = null; return; }
+          this.ctx.onstatechange = () => this._syncMusicPlayback();
+        } catch (_) { this.ctx = null; return false; }
       }
+      return true;
+    }
+
+    unlock() {
+      if (!this._ensureContext()) return;
       this.unlocked = true;
-      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
-      if (this.playing) this._ensureTimer();
+      // This is also called for every shot: an existing music source is reused.
+      this._resumeContext();
+      this._syncMusicPlayback();
+    }
+
+    _resumeContext() {
+      if (!this.ctx || !this.unlocked || this.muted || this.paused || this.ctx.state !== 'suspended' || this._resumePromise) return;
+      this._resumePromise = this.ctx.resume().catch(() => {}).then(() => {
+        this._resumePromise = null;
+        this._syncMusicPlayback();
+      });
     }
 
     setMuted(value) {
-      this.muted = !!value;
+      value = !!value;
+      if (this.muted === value) return;
+      this.muted = value;
       this._setGate();
     }
 
     setPaused(value) {
-      this.paused = !!value;
+      value = !!value;
+      if (this.paused === value) return;
+      this.paused = value;
       this._setGate();
     }
 
@@ -71,23 +96,23 @@
       // Silence immediately, including voices already queued by the scheduler.
       this.master.gain.setValueAtTime(this.muted || this.paused ? 0 : 0.58, now);
       this._clearVoices();
-      this.nextBeat = now + 0.04;
-      if (!this.muted && !this.paused && this.unlocked && this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(() => {});
-      }
+      this._resumeContext();
+      this._syncMusicPlayback();
     }
 
     start() {
+      this._stopImported(true);
+      this._clearVoices();
       this.playing = true;
       this.step = 0;
-      if (this.ctx) this.nextBeat = this.ctx.currentTime + 0.06;
-      this._ensureTimer();
+      this._syncMusicPlayback();
     }
 
     stop() {
       this.playing = false;
       if (this.timer !== null) clearInterval(this.timer);
       this.timer = null;
+      this._stopImported(true);
       this._clearVoices();
       this.step = 0;
     }
@@ -100,34 +125,223 @@
       this.voices.clear();
     }
 
-    _ensureTimer() {
-      if (this.timer !== null || !this.ctx || !this.playing) return;
-      this.timer = setInterval(() => this._schedule(), 40);
+    getMusicStatus() {
+      return {
+        source: this.importedBuffer ? 'imported' : 'none',
+        name: this.importedName,
+        error: this.musicError,
+        ready: this.musicReady,
+        persisted: this.musicPersisted,
+        importing: this.importing
+      };
     }
 
-    _schedule() {
-      if (!this.ctx || !this.playing || this.muted || this.paused || this.ctx.state !== 'running') return;
-      const now = this.ctx.currentTime;
-      if (this.nextBeat < now - 0.2) this.nextBeat = now + 0.025;
-      const interval = 60 / this.tempo / 4;
-      while (this.nextBeat < now + 0.12) {
-        const s = this.step % 64;
-        const t = this.nextBeat;
-        const note = this.melody[s];
-        if (note) this._tone(midi(note), interval * 0.72, 'square', 0.043, t);
-        if (s % 4 === 0) {
-          const bass = midi(this.bass[Math.floor(s / 4)]);
-          this._tone(bass, interval * 2.4, 'triangle', 0.16, t);
-        }
-        if (s % 8 === 0 || s % 16 === 11) this._tone(115, 0.095, 'sine', 0.19, t, 36);
-        if (s % 8 === 4) {
-          this._noise(0.075, 0.065, t, 'highpass', 1000);
-          this._tone(170, 0.06, 'triangle', 0.045, t, 95);
-        }
-        if (s % 2 === 0) this._noise(0.022, 0.017, t, 'highpass', 5800);
-        this.step++;
-        this.nextBeat += interval;
+    _notifyMusicChange() {
+      window.dispatchEvent(new CustomEvent('game-music-change', {detail: this.getMusicStatus()}));
+    }
+
+    _openMusicDatabase() {
+      if (!this._dbPromise) {
+        this._dbPromise = new Promise((resolve, reject) => {
+          if (!window.indexedDB) { reject(new Error('本机存储不可用')); return; }
+          const request = window.indexedDB.open('jungle-assault-music', 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains('music')) db.createObjectStore('music');
+          };
+          request.onsuccess = () => {
+            const db = request.result;
+            db.onversionchange = () => { db.close(); this._dbPromise = null; };
+            resolve(db);
+          };
+          request.onerror = () => reject(request.error || new Error('本机存储不可用'));
+          request.onblocked = () => reject(new Error('本机存储正被其他窗口占用'));
+        }).catch(error => { this._dbPromise = null; throw error; });
       }
+      return this._dbPromise;
+    }
+
+    async _readMusicRecord() {
+      const db = await this._openMusicDatabase();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('music', 'readonly');
+        const request = tx.objectStore('music').get('background');
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error || new Error('读取音乐失败'));
+        tx.onabort = () => reject(tx.error || new Error('读取音乐失败'));
+      });
+    }
+
+    _persistMusic(record, revision) {
+      // Serialize writes so a slow previous import cannot overwrite a newer choice.
+      this._storageQueue = this._storageQueue.catch(() => {}).then(async () => {
+        if (revision !== this._musicRevision) return false;
+        const db = await this._openMusicDatabase();
+        if (revision !== this._musicRevision) return false;
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('music', 'readwrite');
+          const store = tx.objectStore('music');
+          if (record) store.put(record, 'background');
+          else store.delete('background');
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error || new Error('保存音乐失败'));
+          tx.onabort = () => reject(tx.error || new Error('保存音乐失败'));
+        });
+      });
+      return this._storageQueue;
+    }
+
+    _fileBytes(file) {
+      if (typeof file.arrayBuffer === 'function') return file.arrayBuffer();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('无法读取所选文件'));
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    async _decodeMusic(blob) {
+      if (!blob || !Number.isFinite(blob.size) || blob.size <= 0) throw new Error('请选择有效的音频文件');
+      if (blob.size > 20 * 1024 * 1024) throw new Error('音频文件不能超过 20 MB');
+      if (!this._ensureContext()) throw new Error('当前设备不支持音频播放');
+      const bytes = await this._fileBytes(blob);
+      let buffer;
+      try {
+        buffer = await new Promise((resolve, reject) => {
+          const result = this.ctx.decodeAudioData(bytes, resolve, reject);
+          if (result && typeof result.then === 'function') result.then(resolve, reject);
+        });
+      } catch (_) {
+        throw new Error('无法解码此文件，请选择设备支持的 MP3、WAV 或其他音频格式');
+      }
+      if (!buffer || !Number.isFinite(buffer.duration) || buffer.duration <= 0 || !buffer.numberOfChannels) {
+        throw new Error('音频文件没有可播放的内容');
+      }
+      return buffer;
+    }
+
+    async _restoreImportedMusic() {
+      const revision = this._musicRevision;
+      try {
+        const record = await this._readMusicRecord();
+        if (record && revision === this._musicRevision) {
+          const buffer = await this._decodeMusic(record.blob);
+          if (revision === this._musicRevision) {
+            this.importedBuffer = buffer;
+            this.importedName = record.name || '本地音乐';
+            this.musicPersisted = true;
+          }
+        }
+      } catch (_) {
+        // Storage may be disabled in a browser; game effects still work.
+        if (revision === this._musicRevision && this.ctx) this.musicError = '无法恢复已保存的音乐，请重新导入';
+      } finally {
+        this.musicReady = true;
+        this._syncMusicPlayback();
+        this._notifyMusicChange();
+      }
+      return this.getMusicStatus();
+    }
+
+    async importMusic(file) {
+      await this.ready;
+      const revision = ++this._musicRevision;
+      this.importing = true;
+      this.musicError = '';
+      this._notifyMusicChange();
+      try {
+        // Validate fully before touching the currently selected or playing music.
+        const buffer = await this._decodeMusic(file);
+        if (revision !== this._musicRevision) throw new Error('此导入已取消');
+        const name = String(file.name || '本地音乐').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120) || '本地音乐';
+        this._stopImported(true);
+        this._clearVoices();
+        this.importedBuffer = buffer;
+        this.importedName = name;
+        this.musicPersisted = false;
+        this.step = 0;
+        this._syncMusicPlayback();
+        try {
+          const saved = await this._persistMusic({blob: file, name}, revision);
+          if (revision === this._musicRevision) this.musicPersisted = saved;
+        } catch (_) {
+          if (revision === this._musicRevision) this.musicError = '音乐已导入，但本机存储不可用，关闭后需重新导入';
+        }
+        if (revision !== this._musicRevision) throw new Error('此导入已取消');
+        this.importing = false;
+        return this.getMusicStatus();
+      } catch (error) {
+        if (revision === this._musicRevision) this.musicError = error.message || '音乐导入失败';
+        throw error;
+      } finally {
+        if (revision === this._musicRevision) {
+          this.importing = false;
+          this._notifyMusicChange();
+        }
+      }
+    }
+
+    async clearImportedMusic() {
+      const revision = ++this._musicRevision;
+      this._stopImported(true);
+      this._clearVoices();
+      this.importedBuffer = null;
+      this.importedName = '';
+      this.musicError = '';
+      this.musicPersisted = false;
+      this.importing = false;
+      this.step = 0;
+      this._syncMusicPlayback();
+      this._notifyMusicChange();
+      await this.ready;
+      try {
+        await this._persistMusic(null, revision);
+      } catch (_) {
+        if (revision === this._musicRevision) this.musicError = '已关闭背景音乐，但无法清除本机保存的音乐';
+      }
+      if (revision === this._musicRevision) this._notifyMusicChange();
+      return this.getMusicStatus();
+    }
+
+    _stopImported(resetPosition = false) {
+      if (this._musicSource) {
+        if (this.importedBuffer && this.ctx) {
+          this._musicOffset = (this._musicOffset + Math.max(0, this.ctx.currentTime - this._musicStartedAt)) % this.importedBuffer.duration;
+        }
+        this._musicSource.onended = null;
+        try { this._musicSource.stop(); } catch (_) {}
+        try { this._musicSource.disconnect(); } catch (_) {}
+        if (this._musicGain) this._musicGain.disconnect();
+        this._musicSource = null;
+        this._musicGain = null;
+      }
+      if (resetPosition) this._musicOffset = 0;
+    }
+
+    _syncMusicPlayback() {
+      if (!this.importedBuffer) {
+        this._stopImported(true);
+        return;
+      }
+      if (this.timer !== null) clearInterval(this.timer);
+      this.timer = null;
+      if (!this.ctx || !this.playing || !this.unlocked || this.muted || this.paused || this.ctx.state !== 'running') {
+        this._stopImported(false);
+        return;
+      }
+      if (this._musicSource) return;
+      const source = this.ctx.createBufferSource();
+      const gain = this.ctx.createGain();
+      source.buffer = this.importedBuffer;
+      source.loop = true;
+      gain.gain.value = 0.38;
+      source.connect(gain);
+      gain.connect(this.master);
+      this._musicSource = source;
+      this._musicGain = gain;
+      this._musicStartedAt = this.ctx.currentTime;
+      source.start(this._musicStartedAt, this._musicOffset % this.importedBuffer.duration);
     }
 
     _track(node, gain, filter) {

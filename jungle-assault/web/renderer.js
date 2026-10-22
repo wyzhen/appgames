@@ -182,50 +182,107 @@
       this.rect(x-18,y+18,6,2,'#5e8a75');this.rect(x+12,y+18,6,2,'#5e8a75');
     }
     boss(b,cam,t) {
-      if(!b)return;const x=Math.round(b.x-cam),floor=b.y||430;
-      if(x>1170||x<-240)return;
-      // A jungle-claimed steel and concrete fortress.
-      this.rect(x-106,142,212,floor-142,'#192e34');
-      this.rect(x-120,157,22,floor-157,'#475650');this.rect(x+98,157,22,floor-157,'#475650');
-      for(let yy=164;yy<floor;yy+=32){this.rect(x-117,yy,15,3,'#71806b');this.rect(x+101,yy,15,3,'#71806b');this.rect(x-116,yy+17,4,12,'#2e403d');this.rect(x+110,yy+17,4,12,'#2e403d');}
-      this.rect(x-104,139,208,14,'#657365');this.rect(x-94,127,188,13,'#374f47');this.rect(x-91,126,182,3,'#99aa7b');
-      this.poly([[x-82,151],[x+82,151],[x+82,floor],[x-82,floor]],'#344a49');
-      for(let j=0;j<6;j++){
-        this.rect(x-76+j*26,157,22,floor-166,j%2?'#2b4241':'#3d5250');
-        this.rect(x-74+j*26,159,2,floor-171,'#657367');
+      if(!b)return;
+      const floor=b.y||430,left=Math.round((b.wallX==null?b.x-130:b.wallX)-cam),w=270,right=left+w,top=floor-210;
+      if(left>1000||right<-40)return;
+      const steel='#94aaa2',light='#c7d1bb',edge='#e0dfc2',shade='#637e79',dark='#2c484c',black='#182f35';
+      // A broad, front-facing 8-bit base wall. The left edge is the physical wall.
+      this.rect(left+8,top-8,w-16,8,shade);
+      this.rect(left+16,top-12,w-32,4,light);
+      this.rect(left,top,w,floor-top,steel);
+      this.rect(left,top,8,floor-top,light);
+      this.rect(right-8,top,8,floor-top,shade);
+      this.rect(left,top,w,6,edge);
+      this.rect(left+8,top+6,w-16,5,shade);
+      // Staggered concrete courses give the facade the chunky NES fortress rhythm.
+      for(let row=0;row<6;row++){
+        const yy=top+14+row*28;
+        this.rect(left+9,yy+24,w-18,3,dark);
+        for(let col=0;col<6;col++){
+          const xx=left+10+col*48-(row%2)*24;
+          if(xx>left+8&&xx<right-10){this.rect(xx,yy,3,24,shade);this.rect(xx+3,yy+2,2,20,light);}
+        }
       }
-      this.rect(x-70,174,140,64,'#172e32');this.rect(x-65,179,130,51,'#4d594d');
-      for(let j=0;j<9;j++)this.rect(x-59+j*14,182,7,43,'#243c3c');
-      this.rect(x-28,184,56,29,'#203a3c');this.rect(x-24,188,48,21,'#b08353');
-      this.rect(x-20,190,40,3,'#e1b36c');
-      this.ctx.fillStyle='#293b34';this.ctx.font='bold 14px monospace';this.ctx.textAlign='center';this.ctx.fillText('01',x,205);
-      const cy=floor-95,open=b.coreOpen;
-      this.poly([[x-46,cy-42],[x+46,cy-42],[x+56,cy-28],[x+56,cy+28],[x+41,cy+43],[x-41,cy+43],[x-56,cy+28],[x-56,cy-28]],'#14282d');
-      this.rect(x-44,cy-33,88,66,'#707a65');this.rect(x-39,cy-28,78,56,'#293a38');
-      const alive=b.hp>0;
-      if(open&&alive){
-        this.rect(x-31,cy-24,62,48,'#6f3735');this.rect(x-25,cy-19,50,38,b.flash>0?'#fff1bb':'#c65444');this.rect(x-17,cy-13,34,26,'#ef8b58');this.rect(x-10,cy-7,20,14,'#ffe1a0');
-        this.rect(x-34,cy-27,5,54,'#1f3436');this.rect(x+29,cy-27,5,54,'#1f3436');
+      // Thick side posts, square bolts and horizontal metal straps frame the guns.
+      for(const xx of [left+8,right-24]){
+        this.rect(xx,top+12,16,floor-top-16,shade);
+        this.rect(xx,top+12,4,floor-top-16,light);
+        for(let yy=top+22;yy<floor-6;yy+=34){this.rect(xx+6,yy,6,6,dark);this.rect(xx+6,yy,4,3,edge);}
+      }
+      this.rect(left+24,top+42,w-48,8,dark);
+      this.rect(left+26,top+43,w-52,3,light);
+      this.rect(left+24,top+109,w-48,8,dark);
+      this.rect(left+26,top+110,w-52,3,light);
+      // Small grille panels remain distinct from the fully exposed red weak point.
+      for(const xx of [left+31,right-65]){
+        this.rect(xx,floor-64,34,48,dark);
+        this.rect(xx+2,floor-62,30,3,light);
+        for(let yy=floor-55;yy<floor-18;yy+=8){this.rect(xx+4,yy,26,4,shade);this.rect(xx+4,yy,26,1,light);}
+      }
+      // The lower red power unit is always targetable. Never draw a closing gate.
+      const core=b.core||{x:b.x,y:floor-32,w:66,h:44};
+      const cx=Math.round(core.x-cam),cy=Math.round(core.y),cw=core.w||66,ch=core.h||44,alive=b.hp>0;
+      this.rect(cx-cw/2-10,cy-ch/2-8,cw+20,ch+14,black);
+      this.rect(cx-cw/2-7,cy-ch/2-6,cw+14,ch+10,shade);
+      this.rect(cx-cw/2-7,cy-ch/2-6,cw+14,4,edge);
+      this.rect(cx-cw/2-7,cy-ch/2-2,4,ch+5,light);
+      this.rect(cx-cw/2,cy-ch/2,cw,ch,alive?'#8e302d':'#252f30');
+      if(alive){
+        const flash=b.flash>0,pulse=Math.sin(t*5)>0;
+        this.rect(cx-cw/2+4,cy-ch/2+4,cw-8,ch-8,flash?'#fff1c9':'#d24c3b');
+        this.rect(cx-cw/2+7,cy-ch/2+5,cw-14,5,flash?'#ffffff':'#f17b51');
+        this.rect(cx-cw/2+4,cy+ch/2-8,cw-8,4,flash?'#ffe7ab':'#a8302c');
+        // Red recessed corners and a bright central panel read as one vulnerable unit.
+        this.rect(cx-17,cy-12,34,24,flash?'#fffad7':pulse?'#ed6945':'#df5b3d');
+        this.rect(cx-11,cy-8,22,16,flash?'#ffffff':'#f69a5d');
+        this.rect(cx-8,cy-5,16,3,flash?'#ffffff':'#ffd58c');
+        this.rect(cx-cw/2+6,cy-3,5,9,'#842e2b');this.rect(cx+cw/2-11,cy-3,5,9,'#842e2b');
       }else{
-        for(let j=0;j<6;j++){this.rect(x-32+j*11,cy-22,9,44,alive?'#56655b':'#242f30');this.rect(x-31+j*11,cy-20,2,40,alive?'#8a9278':'#3a4640');}
-        this.rect(x-32,cy-2,64,4,alive?'#a05c43':'#3b3531');
+        this.rect(cx-cw/2+4,cy-ch/2+4,cw-8,ch-8,'#13262b');
+        this.line(cx-26,cy-13,cx-8,cy+11,'#56625b',4);this.line(cx+24,cy-14,cx+8,cy+10,'#56625b',4);
+        this.rect(cx-12,cy+10,25,5,'#643b30');
       }
-      for(let yy=cy-34;yy<=cy+34;yy+=68)for(let xx=x-45;xx<=x+45;xx+=90){this.rect(xx-2,yy-2,5,5,'#bec29a');}
-      for(let j=0;j<2;j++){
-        const xx=x+(j?-76:76);this.rect(xx-8,floor-38,16,24,'#202f30');for(let r=0;r<4;r++)this.rect(xx-6,floor-36+r*6,12,2,'#b17b4e');
-      }
-      this.rect(x-120,floor-6,240,10,'#899477');this.rect(x-124,floor+4,248,10,'#3d5147');
-      (b.turrets||[]).forEach(q=>{const xx=q.x-cam,yy=q.y;
-        this.rect(xx-23,yy-23,46,46,'#1c2d31');this.rect(xx-20,yy-20,40,40,'#87917b');this.rect(xx-16,yy-16,32,32,'#344845');
-        if(q.hp>0){this.poly([[xx-15,yy-9],[xx-9,yy-15],[xx+9,yy-15],[xx+15,yy-9],[xx+15,yy+9],[xx+9,yy+15],[xx-9,yy+15],[xx-15,yy+9]],q.flash>0?'#ffe7b0':'#b27a51');this.rect(xx-7,yy-7,14,14,'#2b3331');this.rect(xx-3,yy-3,6,6,'#e9a15a');}else{this.rect(xx-12,yy-12,24,24,'#19282b');this.line(xx-14,yy-14,xx+12,yy+10,'#52584a',3);}
+      for(const xx of [cx-cw/2-5,cx+cw/2+3])for(const yy of [cy-ch/2-3,cy+ch/2+2]){this.rect(xx,yy,4,4,edge);}
+      // Upper red muzzle ports: the charge animation telegraphs each aimed shell.
+      (b.turrets||[]).forEach(q=>{
+        const xx=Math.round(q.x-cam),yy=Math.round(q.y),charge=Math.max(0,Math.min(1,q.charge||0));
+        this.rect(xx-25,yy-25,50,50,dark);
+        this.rect(xx-23,yy-23,46,46,light);
+        this.rect(xx-20,yy-20,40,40,shade);
+        this.rect(xx-18,yy-18,36,36,black);
+        for(const dx of [-21,18])for(const dy of [-21,18]){this.rect(xx+dx,yy+dy,3,3,edge);}
+        if(q.hp>0){
+          const ring=q.flash>0?'#fff1c4':charge>.65?'#ef9b56':'#c94b3c';
+          this.poly([[xx-10,yy-17],[xx+10,yy-17],[xx+17,yy-10],[xx+17,yy+10],[xx+10,yy+17],[xx-10,yy+17],[xx-17,yy+10],[xx-17,yy-10]],ring);
+          this.rect(xx-10,yy-13,20,4,q.flash>0?'#ffffff':'#f37b53');
+          this.rect(xx-12,yy-9,24,20,'#7d302d');
+          this.rect(xx-8,yy-8,16,16,charge>.3?'#b84b35':'#1a2c31');
+          if(charge>0){
+            const r=charge>.7?6:charge>.35?4:2;
+            this.rect(xx-r,yy-r,r*2,r*2,charge>.7?'#ffe0a0':'#ee8950');
+            this.rect(xx-2,yy-2,4,4,charge>.85?'#fff5ce':'#ffc87b');
+          }
+          if(charge>.82&&Math.floor(t*15)%2===0){this.rect(xx-2,yy-23,4,5,'#ffc176');this.rect(xx-23,yy-2,5,4,'#ffc176');this.rect(xx+18,yy-2,5,4,'#ffc176');}
+        }else{
+          this.poly([[xx-13,yy-15],[xx+12,yy-15],[xx+17,yy-7],[xx+13,yy+14],[xx-8,yy+16],[xx-17,yy+5]],'#17282b');
+          this.line(xx-16,yy-16,xx-5,yy-6,'#4d5f59',3);this.line(xx+15,yy+15,xx+5,yy+4,'#4d5f59',3);
+          this.rect(xx-10,yy+9,8,4,'#634233');this.rect(xx+5,yy-13,7,4,'#614137');
+        }
       });
-      this.fern(x-112,157,.9,'#3b6e44');this.fern(x+103,153,.7,'#4b7b48',-1);
-      this.line(x-89,128,x-87,201,'#447447',3);this.rect(x-90,166,8,5,'#698b4c');this.rect(x-84,186,8,5,'#698b4c');
+      this.rect(left-4,floor-4,w+8,6,light);
+      this.rect(left-8,floor+2,w+16,8,shade);
+      this.rect(left-8,floor+2,w+16,2,edge);
     }
     bullet(b,cam,t){
       const x=Math.round(b.x-cam),y=Math.round(b.y);
-      if(b.type==='grenade'){this.rect(x-4,y-4,8,8,'#86946b');this.rect(x-2,y-7,4,3,'#e4b96e');this.rect(x,y-10,2,2,'#ffdfa1');return;}
-      if(b.enemy){this.rect(x-4,y-4,8,8,'#ad4e3d');this.rect(x-3,y-3,6,6,'#f5a467');this.rect(x-1,y-1,3,3,'#fff0b2');return;}
+      if(b.type==='grenade'){this.rect(x-4,y-6,8,12,'#c3613e');this.rect(x-6,y-4,12,8,'#c3613e');this.rect(x-4,y-4,8,8,'#b8ac68');this.rect(x-2,y-2,4,4,'#fae6a1');this.rect(x-2,y-8,4,3,'#e4b96e');this.rect(x,y-10,2,2,'#ffdfa1');return;}
+      if(b.enemy){
+        if(b.boss){
+          this.poly([[x-3,y-6],[x+3,y-6],[x+6,y-3],[x+6,y+3],[x+3,y+6],[x-3,y+6],[x-6,y+3],[x-6,y-3]],'#bc4535');
+          this.rect(x-4,y-4,8,8,'#f3944d');this.rect(x-2,y-2,4,4,'#fff0b5');
+        }else{this.rect(x-4,y-4,8,8,'#ad4e3d');this.rect(x-3,y-3,6,6,'#f5a467');this.rect(x-1,y-1,3,3,'#fff0b2');}
+        return;
+      }
       if(b.type==='L'){
         const n=Math.hypot(b.vx,b.vy)||1,dx=b.vx/n,dy=b.vy/n;
         this.line(x-dx*26,y-dy*26,x+dx*10,y+dy*10,'#4b9fa9',6);this.line(x-dx*24,y-dy*24,x+dx*11,y+dy*11,'#b8f1d9',2);return;
