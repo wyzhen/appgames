@@ -2,9 +2,10 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#091b21"><title>丛林突击 · 第一关</title>
+<meta name="theme-color" content="#091b21"><title>丛林突击 · 基地行动</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="music.css">
+<link rel="stylesheet" href="campaign.css">
 </head>
 <body>
 <main id="viewport">
@@ -12,17 +13,18 @@
   <div class="vignette"></div>
   <section id="menu" class="screen">
     <div class="menu-shade"></div>
-    <div class="brand"><span class="mark">╱╱</span> JUNGLE ASSAULT <span class="tiny">ARCADE / 01</span></div>
+    <div class="brand"><span class="mark">╱╱</span> JUNGLE ASSAULT <span class="tiny">ARCADE / 02</span></div>
     <div class="menu-copy">
       <div class="eyebrow"><span class="light"></span> 单人作战 · 离线街机</div>
       <h1>丛林<span>突击</span><i>JUNGLE ASSAULT</i></h1>
-      <p class="intro">深入丛林，穿越火线。<br>向前推进，摧毁敌军基地核心。</p>
+      <p class="intro" id="mission-intro">深入丛林，穿越火线。<br>向前推进，摧毁敌军基地核心。</p>
+      <div class="level-select" role="group" aria-label="选择起始关卡"><button data-level="1" class="selected">01 <b>丛林前线</b></button><button data-level="2">02 <b>基地渗透</b></button></div>
       <div class="difficulty" role="group" aria-label="难度选择"><button class="selected" data-mode="classic">经典模式 <small>3 条生命</small></button><button data-mode="practice">练习模式 <small>8 条生命</small></button></div>
       <div class="actions"><button id="start" class="primary">开始行动 <span>→</span></button><button id="help" class="secondary">操作指南</button><button id="music-settings" class="secondary">音乐</button></div>
-      <div class="menu-foot">支持本地原声音乐 <b>•</b> 经典跑跳射击玩法 <b>•</b> v1.1</div>
+      <div class="menu-foot">双关卡战役 <b>•</b> 分场景原声导入 <b>•</b> v1.2</div>
     </div>
-    <div class="mission"><span>MISSION</span><strong>01</strong><div>丛林前线</div><small>JUNGLE FRONTLINE</small></div>
-    <div class="level-route"><span class="route-point"></span><b>丛林入口</b><i></i><span>爆破木桥</span><i></i><span>基地核心</span><em>STAGE 01 / 01</em></div>
+    <div class="mission"><span>MISSION</span><strong id="mission-index">01</strong><div id="mission-name">丛林前线</div><small id="mission-english">JUNGLE FRONTLINE</small></div>
+    <div class="level-route" id="level-route"><span class="route-point"></span><b>丛林入口</b><i></i><span>爆破木桥</span><i></i><span>基地核心</span><em>STAGE 01 / 02</em></div>
     <button id="menu-mute" class="icon menu-mute" aria-label="静音切换">♫</button>
   </section>
   <section id="hud" hidden>
@@ -42,5 +44,5 @@
   <input id="music-file" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" hidden aria-label="选择本地背景音乐">
   <div id="rotate" hidden><b>↻</b><strong>横屏，开始行动</strong><span>请将手机横过来，获得更好的操作体验</span></div>
 </main>
-<script src="engine.js"></script><script src="renderer.js"></script><script src="audio.js"></script><script src="app.js"></script>
+<script src="engine.js"></script><script src="base-engine.js"></script><script src="campaign.js"></script><script src="renderer.js"></script><script src="base-renderer.js"></script><script src="audio.js"></script><script src="app.js"></script>
 </body></html>

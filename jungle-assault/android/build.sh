@@ -7,7 +7,8 @@ BUILD_TOOLS="$TOOLCHAIN/android-15"
 ANDROID_JAR="$TOOLCHAIN/android-35/android.jar"
 BUILD_DIR="$ANDROID_PROJECT/build"
 OUTPUT_DIR="$PROJECT_ROOT/dist"
-APK="$OUTPUT_DIR/JungleAssault-Level1.apk"
+APK="$OUTPUT_DIR/JungleAssault.apk"
+LEGACY_APK="$OUTPUT_DIR/JungleAssault-Level1.apk"
 for required in "$BUILD_TOOLS/aapt2" "$BUILD_TOOLS/zipalign" "$ANDROID_JAR" "$TOOLCHAIN/ecj.jar"; do
     if [ ! -f "$required" ]; then
         echo "Missing build dependency: $required" >&2
@@ -63,5 +64,9 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
     print(f'Verified {len(files)} bundled game assets byte-for-byte.')
 PY
 "$BUILD_TOOLS/aapt" dump badging "$APK" | sed -n '1,12p'
+(cd "$OUTPUT_DIR" && sha256sum JungleAssault.apk > JungleAssault.apk.sha256)
+cp "$APK" "$LEGACY_APK"
+cmp -s "$APK" "$LEGACY_APK"
 (cd "$OUTPUT_DIR" && sha256sum JungleAssault-Level1.apk > JungleAssault-Level1.apk.sha256)
 echo "Built: $APK"
+echo "Compatibility copy: $LEGACY_APK"

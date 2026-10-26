@@ -2,17 +2,19 @@
 
 Android 离线小游戏项目。
 
-## 丛林突击 · 第一关 v1.1
+## 丛林突击 · 双关卡战役 v1.2
 
-基于经典跑跳射击玩法制作的原创像素游戏，支持 Android 8.0 及以上，横屏、单人、离线游玩。
+经典跑跳射击与纵深基地关卡，支持 Android 8.0 及以上，横屏、单人、离线游玩。
 
-- [项目源码与操作说明](jungle-assault/README.md)
-- [下载安卓 APK](jungle-assault/dist/JungleAssault-Level1.apk?raw=true)
+- [下载安卓 APK](jungle-assault/dist/JungleAssault.apk?raw=true)
+- [操作、构建与音乐说明](jungle-assault/README.md)
 - [版本记录](CHANGELOG.md)
-- [APK SHA-256 校验](jungle-assault/dist/JungleAssault-Level1.apk.sha256)
+- [APK SHA-256 校验](jungle-assault/dist/JungleAssault.apk.sha256)
 
-包含八方向射击、俯卧、散弹/机枪/激光、爆破桥、涉水、敌军炮台及关底核心战。v1.1 支持射击击落敌弹，降低弹幕密度，重做基地 Boss 并放大下方弱点。支持导入本地原声音乐，未导入时保留游戏音效。
+第一关穿越丛林、爆破桥与河流，第二关进入五区基地、关闭电网，再挑战双阶段眼形机核。可从第一关连续推进并保留生命、武器和得分，也可在标题直接选择第二关。
 
-![游戏画面](jungle-assault/dist/gameplay.png)
+音乐按丛林、基地走廊、基地 Boss 分别导入并自动切换；未内置原版音频文件。
 
-首次构建请进入 `jungle-assault/`，按项目说明下载工具链并生成 APK。源码包含玩法与浏览器验证脚本；当前版本已通过自动测试及 APK 签名验证，尚未进行安卓真机测试。
+![第二关画面](jungle-assault/dist/base.png)
+
+源码包含可重复构建脚本、玩法/音频测试及浏览器验收脚本。仓库 APK 使用同一测试签名，可覆盖 v1.1 升级；尚未进行安卓真机测试。

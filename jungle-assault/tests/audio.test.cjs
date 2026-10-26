@@ -6,8 +6,9 @@ const vm = require('node:vm');
 
 // These tests control the audio clock and storage to reproduce lifecycle races.
 // The generated fixture is test data, not bundled game music.
-function fixture({ storageFails = false, savedRecord = null, suspended = false } = {}) {
-  const records = new Map(savedRecord ? [['background', savedRecord]] : []);
+function fixture({ storageFails = false, savedRecord = null, savedRecords = [], suspended = false } = {}) {
+  const records = new Map(savedRecords);
+  if (savedRecord) records.set('background', savedRecord);
   const events = [];
   const contexts = [];
   const pendingDecodes = [];
@@ -204,4 +205,178 @@ test('file import during pause waits for resume and does not change mute prefere
   audio.ctx.state = 'running';
   audio.ctx.onstatechange();
   assert.equal(loops(audio).length, 0);
+});
+
+test('legacy background record restores only to jungle, never to empty stage-two slots', async () => {
+  const record = {blob: audioFile('legacy-stage-one.mp3', 'valid-legacy'), name: 'legacy-stage-one.mp3'};
+  const {audio, records} = fixture({savedRecord: record});
+  await audio.ready;
+  assert.equal(audio.track, 'jungle');
+  assert.equal(audio.getMusicStatus('jungle').name, 'legacy-stage-one.mp3');
+  assert.equal(audio.getMusicStatus('base').source, 'none');
+  assert.equal(audio.getMusicStatus('baseBoss').source, 'none');
+  audio.unlock(); audio.start();
+  const jungleSource = audio._musicSource;
+  assert.equal(jungleSource.buffer.content, 'valid-legacy');
+  audio.setTrack('base');
+  assert.equal(jungleSource.stopped, true);
+  assert.equal(loops(audio).length, 0);
+  audio.setTrack('baseBoss');
+  assert.equal(loops(audio).length, 0);
+  assert.equal(records.get('background'), record);
+});
+
+test('three music slots save and restore independently without restarting the active source', async () => {
+  const {audio, records, GameAudio} = fixture();
+  await audio.ready;
+  audio.unlock(); audio.start();
+  await audio.importMusic(audioFile('jungle.wav', 'valid-jungle'), 'jungle');
+  const source = audio._musicSource;
+  audio.ctx.currentTime = 3;
+  await audio.importMusic(audioFile('corridor.wav', 'valid-base'), 'base');
+  await audio.importMusic(audioFile('boss.wav', 'valid-baseBoss'), 'baseBoss');
+  assert.equal(audio._musicSource, source);
+  assert.equal(source.stopped, false);
+  assert.equal(source.starts.length, 1);
+  assert.equal(records.get('background').name, 'jungle.wav');
+  assert.equal(records.get('base').name, 'corridor.wav');
+  assert.equal(records.get('baseBoss').name, 'boss.wav');
+  const restored = new GameAudio();
+  await restored.ready;
+  for (const [key, name, content] of [
+    ['jungle', 'jungle.wav', 'valid-jungle'],
+    ['base', 'corridor.wav', 'valid-base'],
+    ['baseBoss', 'boss.wav', 'valid-baseBoss']
+  ]) {
+    const status = restored.getMusicStatus(key);
+    assert.equal(status.key, key);
+    assert.equal(status.name, name);
+    assert.equal(status.ready, true);
+    assert.equal(status.persisted, true);
+    assert.equal(restored._musicSlots[key].buffer.content, content);
+  }
+  assert.equal(loops(restored).length, 0);
+});
+
+test('rapid stage changes keep one loop; repeated setTrack is idempotent', async () => {
+  const {audio, events} = fixture();
+  await audio.ready;
+  for (const key of ['jungle', 'base', 'baseBoss']) await audio.importMusic(audioFile(key + '.wav', 'valid-' + key), key);
+  audio.unlock(); audio.start();
+  for (const key of ['base', 'baseBoss', 'jungle', 'baseBoss', 'base']) {
+    const old = audio._musicSource;
+    const status = audio.setTrack(key);
+    assert.equal(old.stopped, true);
+    assert.equal(status.currentTrack, key);
+    assert.equal(audio._musicSource.buffer.content, 'valid-' + key);
+    assert.equal(audio._musicSource.starts[0][1], 0);
+    assert.equal(loops(audio).length, 1);
+    const source = audio._musicSource;
+    const eventCount = events.length;
+    audio.ctx.currentTime += 1;
+    for (let i = 0; i < 5; i++) audio.setTrack(key);
+    assert.equal(audio._musicSource, source);
+    assert.equal(source.starts.length, 1);
+    assert.equal(source.stopped, false);
+    assert.equal(events.length, eventCount);
+  }
+});
+
+test('failed import and clearing a non-current slot do not affect other slots or current playback', async () => {
+  const {audio, records} = fixture();
+  await audio.ready;
+  for (const key of ['jungle', 'base', 'baseBoss']) await audio.importMusic(audioFile(key + '.wav', 'valid-' + key), key);
+  audio.unlock(); audio.start();
+  const source = audio._musicSource;
+  const baseBuffer = audio._musicSlots.base.buffer;
+  await assert.rejects(audio.importMusic(audioFile('bad-base.wav', 'broken'), 'base'), /无法解码/);
+  assert.equal(audio._musicSlots.base.buffer, baseBuffer);
+  assert.match(audio.getMusicStatus('base').error, /无法解码/);
+  assert.equal(audio.getMusicStatus('jungle').error, '');
+  assert.equal(audio.getMusicStatus('baseBoss').error, '');
+  assert.equal(audio._musicSource, source);
+  await audio.clearImportedMusic('base');
+  assert.equal(audio._musicSource, source);
+  assert.equal(source.stopped, false);
+  assert.equal(audio.getMusicStatus('base').source, 'none');
+  assert.equal(audio.getMusicStatus('base').error, '');
+  assert.equal(audio.getMusicStatus('baseBoss').name, 'baseBoss.wav');
+  assert.equal(records.has('base'), false);
+  assert.equal(records.has('background'), true);
+  assert.equal(records.has('baseBoss'), true);
+  await audio.clearImportedMusic('jungle');
+  assert.equal(loops(audio).length, 0);
+  assert.equal(audio.getMusicStatus('baseBoss').source, 'imported');
+});
+
+test('default import captures its slot before await and leaves a newly active slot playing', async () => {
+  const {audio, pendingDecodes} = fixture();
+  await audio.ready;
+  await audio.importMusic(audioFile('base.wav', 'valid-base'), 'base');
+  audio.unlock(); audio.start();
+  const pending = audio.importMusic(audioFile('pending-jungle.wav', 'pending'));
+  audio.setTrack('base');
+  const baseSource = audio._musicSource;
+  await tick();
+  pendingDecodes[0].resolve();
+  const result = await pending;
+  assert.equal(result.key, 'jungle');
+  assert.equal(result.currentTrack, 'base');
+  assert.equal(audio.getMusicStatus('jungle').name, 'pending-jungle.wav');
+  assert.equal(audio.getMusicStatus().name, 'base.wav');
+  assert.equal(audio._musicSource, baseSource);
+  assert.equal(baseSource.stopped, false);
+});
+
+test('concurrent imports and cancellation are independent per music slot', async () => {
+  const {audio, records, pendingDecodes} = fixture();
+  await audio.ready;
+  const basePending = audio.importMusic(audioFile('pending-base.wav', 'pending'), 'base');
+  await tick();
+  const jungleImport = audio.importMusic(audioFile('jungle.wav', 'valid-jungle'), 'jungle');
+  await audio.clearImportedMusic('base');
+  pendingDecodes[0].resolve();
+  await assert.rejects(basePending, /已取消/);
+  await jungleImport;
+  assert.equal(audio.getMusicStatus('jungle').source, 'imported');
+  assert.equal(audio.getMusicStatus('base').source, 'none');
+  assert.equal(records.get('background').name, 'jungle.wav');
+  assert.equal(records.has('base'), false);
+});
+
+test('clear before ready cancels an earlier import and blocks the saved record from reappearing', async () => {
+  const record = {blob: audioFile(), name: 'saved.wav'};
+  const {audio, records} = fixture({savedRecord: record});
+  const pending = audio.importMusic(audioFile('new.wav'));
+  const cancelled = assert.rejects(pending, /已取消/);
+  await audio.clearImportedMusic();
+  await cancelled;
+  assert.equal(audio.getMusicStatus().source, 'none');
+  assert.equal(audio.getMusicStatus().importing, false);
+  assert.equal(records.has('background'), false);
+});
+
+test('invalid import before ready preserves the legacy record; corrupt other-slot data stays isolated', async () => {
+  const record = {blob: audioFile('legacy.wav', 'valid-legacy'), name: 'legacy.wav'};
+  const {audio} = fixture({savedRecord: record, savedRecords: [
+    ['base', {blob: audioFile('broken.wav', 'invalid'), name: 'broken.wav'}],
+    ['baseBoss', {blob: audioFile('boss.wav', 'valid-boss'), name: 'boss.wav'}]
+  ]});
+  await assert.rejects(audio.importMusic(audioFile('invalid.wav', 'invalid')), /无法解码/);
+  assert.equal(audio.getMusicStatus('jungle').name, 'legacy.wav');
+  assert.equal(audio.getMusicStatus('base').source, 'none');
+  assert.match(audio.getMusicStatus('base').error, /无法恢复/);
+  assert.equal(audio.getMusicStatus('baseBoss').name, 'boss.wav');
+  assert.equal(audio.getMusicStatus('baseBoss').error, '');
+  assert.equal(audio.musicReady, true);
+});
+
+test('unknown slot keys are rejected without changing playback selection', async () => {
+  const {audio} = fixture();
+  await audio.ready;
+  assert.throws(() => audio.setTrack('unknown'), /未知/);
+  assert.throws(() => audio.getMusicStatus('unknown'), /未知/);
+  await assert.rejects(audio.importMusic(audioFile(), 'unknown'), /未知/);
+  await assert.rejects(audio.clearImportedMusic('unknown'), /未知/);
+  assert.equal(audio.track, 'jungle');
 });

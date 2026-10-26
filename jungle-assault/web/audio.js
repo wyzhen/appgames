@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+  const MUSIC_KEYS = ['jungle', 'base', 'baseBoss'];
 
   class GameAudio {
     constructor() {
@@ -14,17 +15,16 @@
       this.lastEffects = Object.create(null);
       this.step = 0;
       this.timer = null;
-      this.importedBuffer = null;
-      this.importedName = '';
-      this.musicError = '';
+      this.track = 'jungle';
+      this._musicSlots = Object.fromEntries(MUSIC_KEYS.map(key => [key, {
+        buffer: null, name: '', error: '', ready: false, persisted: false,
+        importing: false, revision: 0, restoreBlocked: false
+      }]));
       this.musicReady = false;
-      this.musicPersisted = false;
-      this.importing = false;
       this._musicSource = null;
       this._musicGain = null;
       this._musicOffset = 0;
       this._musicStartedAt = 0;
-      this._musicRevision = 0;
       this._storageQueue = Promise.resolve();
       this._dbPromise = null;
       this._resumePromise = null;
@@ -125,19 +125,45 @@
       this.voices.clear();
     }
 
-    getMusicStatus() {
+    // Keep the original single-track read properties for existing integrations.
+    get importedBuffer() { return this._musicSlots[this.track].buffer; }
+    get importedName() { return this._musicSlots[this.track].name; }
+    get musicError() { return this._musicSlots[this.track].error; }
+    get musicPersisted() { return this._musicSlots[this.track].persisted; }
+    get importing() { return this._musicSlots[this.track].importing; }
+
+    _getMusicSlot(key) {
+      if (!MUSIC_KEYS.includes(key)) throw new Error('未知的音乐槽');
+      return this._musicSlots[key];
+    }
+
+    setTrack(key) {
+      this._getMusicSlot(key);
+      if (key === this.track) return this.getMusicStatus();
+      // Stop while the old track is still selected, so elapsed time uses its buffer.
+      this._stopImported(true);
+      this.track = key;
+      this._syncMusicPlayback();
+      this._notifyMusicChange(key);
+      return this.getMusicStatus();
+    }
+
+    getMusicStatus(key = this.track) {
+      const slot = this._getMusicSlot(key);
       return {
-        source: this.importedBuffer ? 'imported' : 'none',
-        name: this.importedName,
-        error: this.musicError,
-        ready: this.musicReady,
-        persisted: this.musicPersisted,
-        importing: this.importing
+        key,
+        currentTrack: this.track,
+        source: slot.buffer ? 'imported' : 'none',
+        name: slot.name,
+        error: slot.error,
+        ready: slot.ready,
+        persisted: slot.persisted,
+        importing: slot.importing
       };
     }
 
-    _notifyMusicChange() {
-      window.dispatchEvent(new CustomEvent('game-music-change', {detail: this.getMusicStatus()}));
+    _notifyMusicChange(key = this.track) {
+      window.dispatchEvent(new CustomEvent('game-music-change', {detail: this.getMusicStatus(key)}));
     }
 
     _openMusicDatabase() {
@@ -161,28 +187,34 @@
       return this._dbPromise;
     }
 
-    async _readMusicRecord() {
+    _musicStorageKey(key) {
+      // v1.1 saved stage-one music as "background"; keep that record in place.
+      return key === 'jungle' ? 'background' : key;
+    }
+
+    async _readMusicRecord(key) {
       const db = await this._openMusicDatabase();
       return new Promise((resolve, reject) => {
         const tx = db.transaction('music', 'readonly');
-        const request = tx.objectStore('music').get('background');
+        const request = tx.objectStore('music').get(this._musicStorageKey(key));
         request.onsuccess = () => resolve(request.result || null);
         request.onerror = () => reject(request.error || new Error('读取音乐失败'));
         tx.onabort = () => reject(tx.error || new Error('读取音乐失败'));
       });
     }
 
-    _persistMusic(record, revision) {
+    _persistMusic(record, key, revision) {
       // Serialize writes so a slow previous import cannot overwrite a newer choice.
       this._storageQueue = this._storageQueue.catch(() => {}).then(async () => {
-        if (revision !== this._musicRevision) return false;
+        if (revision !== this._getMusicSlot(key).revision) return false;
         const db = await this._openMusicDatabase();
-        if (revision !== this._musicRevision) return false;
+        if (revision !== this._getMusicSlot(key).revision) return false;
         return new Promise((resolve, reject) => {
           const tx = db.transaction('music', 'readwrite');
           const store = tx.objectStore('music');
-          if (record) store.put(record, 'background');
-          else store.delete('background');
+          const storageKey = this._musicStorageKey(key);
+          if (record) store.put(record, storageKey);
+          else store.delete(storageKey);
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => reject(tx.error || new Error('保存音乐失败'));
           tx.onabort = () => reject(tx.error || new Error('保存音乐失败'));
@@ -222,86 +254,96 @@
     }
 
     async _restoreImportedMusic() {
-      const revision = this._musicRevision;
+      await Promise.all(MUSIC_KEYS.map(key => this._restoreMusicSlot(key)));
+      this.musicReady = true;
+      return this.getMusicStatus();
+    }
+
+    async _restoreMusicSlot(key) {
+      const slot = this._getMusicSlot(key);
+      let foundRecord = false;
       try {
-        const record = await this._readMusicRecord();
-        if (record && revision === this._musicRevision) {
+        const record = await this._readMusicRecord(key);
+        foundRecord = !!record;
+        if (record && !slot.restoreBlocked) {
           const buffer = await this._decodeMusic(record.blob);
-          if (revision === this._musicRevision) {
-            this.importedBuffer = buffer;
-            this.importedName = record.name || '本地音乐';
-            this.musicPersisted = true;
+          if (!slot.restoreBlocked) {
+            slot.buffer = buffer;
+            slot.name = record.name || '本地音乐';
+            slot.persisted = true;
           }
         }
       } catch (_) {
         // Storage may be disabled in a browser; game effects still work.
-        if (revision === this._musicRevision && this.ctx) this.musicError = '无法恢复已保存的音乐，请重新导入';
+        if (!slot.restoreBlocked && foundRecord) slot.error = '无法恢复已保存的音乐，请重新导入';
       } finally {
-        this.musicReady = true;
-        this._syncMusicPlayback();
-        this._notifyMusicChange();
+        slot.ready = true;
+        if (key === this.track) this._syncMusicPlayback();
+        this._notifyMusicChange(key);
       }
-      return this.getMusicStatus();
     }
 
-    async importMusic(file) {
-      await this.ready;
-      const revision = ++this._musicRevision;
-      this.importing = true;
-      this.musicError = '';
-      this._notifyMusicChange();
+    async importMusic(file, key = this.track) {
+      // Capture the slot and intent before any await; changing stages must not
+      // redirect a file, and a later clear must cancel even a not-yet-ready import.
+      const slot = this._getMusicSlot(key);
+      const revision = ++slot.revision;
+      slot.importing = true;
+      slot.error = '';
+      this._notifyMusicChange(key);
       try {
+        await this.ready;
+        if (revision !== slot.revision) throw new Error('此导入已取消');
         // Validate fully before touching the currently selected or playing music.
         const buffer = await this._decodeMusic(file);
-        if (revision !== this._musicRevision) throw new Error('此导入已取消');
+        if (revision !== slot.revision) throw new Error('此导入已取消');
         const name = String(file.name || '本地音乐').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120) || '本地音乐';
-        this._stopImported(true);
-        this._clearVoices();
-        this.importedBuffer = buffer;
-        this.importedName = name;
-        this.musicPersisted = false;
-        this.step = 0;
-        this._syncMusicPlayback();
+        if (key === this.track) this._stopImported(true);
+        slot.buffer = buffer;
+        slot.name = name;
+        slot.error = '';
+        slot.persisted = false;
+        if (key === this.track) this._syncMusicPlayback();
         try {
-          const saved = await this._persistMusic({blob: file, name}, revision);
-          if (revision === this._musicRevision) this.musicPersisted = saved;
+          const saved = await this._persistMusic({blob: file, name}, key, revision);
+          if (revision === slot.revision) slot.persisted = saved;
         } catch (_) {
-          if (revision === this._musicRevision) this.musicError = '音乐已导入，但本机存储不可用，关闭后需重新导入';
+          if (revision === slot.revision) slot.error = '音乐已导入，但本机存储不可用，关闭后需重新导入';
         }
-        if (revision !== this._musicRevision) throw new Error('此导入已取消');
-        this.importing = false;
-        return this.getMusicStatus();
+        if (revision !== slot.revision) throw new Error('此导入已取消');
+        slot.importing = false;
+        return this.getMusicStatus(key);
       } catch (error) {
-        if (revision === this._musicRevision) this.musicError = error.message || '音乐导入失败';
+        if (revision === slot.revision) slot.error = error.message || '音乐导入失败';
         throw error;
       } finally {
-        if (revision === this._musicRevision) {
-          this.importing = false;
-          this._notifyMusicChange();
+        if (revision === slot.revision) {
+          slot.importing = false;
+          this._notifyMusicChange(key);
         }
       }
     }
 
-    async clearImportedMusic() {
-      const revision = ++this._musicRevision;
-      this._stopImported(true);
-      this._clearVoices();
-      this.importedBuffer = null;
-      this.importedName = '';
-      this.musicError = '';
-      this.musicPersisted = false;
-      this.importing = false;
-      this.step = 0;
-      this._syncMusicPlayback();
-      this._notifyMusicChange();
+    async clearImportedMusic(key = this.track) {
+      const slot = this._getMusicSlot(key);
+      const revision = ++slot.revision;
+      slot.restoreBlocked = true;
+      if (key === this.track) this._stopImported(true);
+      slot.buffer = null;
+      slot.name = '';
+      slot.error = '';
+      slot.persisted = false;
+      slot.importing = false;
+      if (key === this.track) this._syncMusicPlayback();
+      this._notifyMusicChange(key);
       await this.ready;
       try {
-        await this._persistMusic(null, revision);
+        await this._persistMusic(null, key, revision);
       } catch (_) {
-        if (revision === this._musicRevision) this.musicError = '已关闭背景音乐，但无法清除本机保存的音乐';
+        if (revision === slot.revision) slot.error = '已关闭背景音乐，但无法清除本机保存的音乐';
       }
-      if (revision === this._musicRevision) this._notifyMusicChange();
-      return this.getMusicStatus();
+      if (revision === slot.revision) this._notifyMusicChange(key);
+      return this.getMusicStatus(key);
     }
 
     _stopImported(resetPosition = false) {

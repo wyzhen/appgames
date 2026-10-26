@@ -1,4 +1,4 @@
-# Android 离线安装包
+# Android 离线安装包（前两关）
 
 - 包名：`com.arcade.jungleassault`
 - 最低系统：Android 8.0（API 26）；目标 SDK：35。
@@ -20,6 +20,6 @@
   ecj.jar
 ```
 
-输出 `dist/JungleAssault-Level1.apk` 与其 SHA-256 摘要。`build.sh` 自动执行 APK v2/v3 签名验证与 zipalign 验证。
+输出主包 `dist/JungleAssault.apk` 及同字节兼容副本 `dist/JungleAssault-Level1.apk`，两份均包含前两关，并各自生成 SHA-256 摘要。`build.sh` 自动执行 APK v2/v3 签名验证与 zipalign 验证。
 
 首次安装时，Android 可能要求为下载 APK 所用的浏览器或文件管理器启用“允许安装未知应用”。

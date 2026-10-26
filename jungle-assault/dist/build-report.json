@@ -1,21 +1,47 @@
 {
-  "app": "丛林突击·第一关",
-  "version": "v1.1",
-  "androidVersionName": "1.1",
-  "androidVersionCode": 2,
+  "app": "丛林突击",
+  "version": "v1.2",
+  "androidVersionName": "1.2",
+  "androidVersionCode": 3,
   "package": "com.arcade.jungleassault",
   "minAndroid": "8.0",
-  "bytes": 45994,
-  "sha256": "a6b5a47c1a58ab694937b88855806ee3013e0fb75a5f2a73ecd6d0c01e0a576b",
-  "engineTests": "20/20 passed",
-  "audioTests": "8/8 passed",
-  "browserSmoke": "passed including real WAV decode, import, invalid-file rollback, persisted restore, clear and standing boss shots",
-  "apkSignature": "v2 + v3 verified; same signing certificate as v1.0",
+  "includedStages": [
+    {
+      "number": 1,
+      "name": "丛林前线"
+    },
+    {
+      "number": 2,
+      "name": "基地渗透",
+      "corridorRooms": 5,
+      "bossPhases": 2
+    }
+  ],
+  "apk": "JungleAssault.apk",
+  "legacyAlias": "JungleAssault-Level1.apk",
+  "legacyAliasByteIdentical": true,
+  "bytes": 62663,
+  "sha256": "ff9dcbb23c1f30ebb79cff806ec5e7ffd067c5a1d532b6ce96ce81bd5df748f5",
+  "tests": {
+    "stage1": "20/20 passed",
+    "stage2": "12/12 passed",
+    "campaign": "7/7 passed",
+    "audio": "17/17 passed",
+    "total": "56/56 passed"
+  },
+  "stage2InputOnlyClear": "all 5 rooms and both boss phases; 31.8s; 0 deaths; no target HP changes or invulnerability overrides",
+  "browserSmoke": "passed: real WAV import, three-slot persistence and isolation, multi-touch, pause, lifecycle, screen ratios, stage selection, carried campaign statistics, all five corridors using keyboard input, boss phases and automatic soundtrack switching",
+  "browserFixtureNote": "browser integration tests shorten target HP and use invulnerability for deterministic UI verification; separate model tests verify unmodified combat",
+  "apkSignature": "v2 + v3 verified; same certificate as v1.1",
   "zipalign": "passed",
-  "bundledAssets": "7/7 byte-identical",
+  "bundledAssets": "11/11 byte-identical",
+  "permissions": [],
   "originalMusicBundled": false,
-  "musicSupport": "local file import; default game sound effects only",
-  "soundtrackTitle": "密林の戦い (メインBGM) / Jungle Battle",
-  "soundtrackReference": "https://open.spotify.com/track/1Zwv8Sn4WUr7EMqIXLVqfk",
+  "musicSlots": {
+    "jungle": "密林の戦い (メインBGM)",
+    "base": "迷路要塞1 (3D)",
+    "baseBoss": "迷路要塞2 (3Dボス)"
+  },
+  "musicSupport": "independent local-file import, persistence, loop playback and automatic scene switching; empty slots use game effects only",
   "androidDeviceTest": "not run (no device or emulator available)"
 }
