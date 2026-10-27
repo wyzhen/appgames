@@ -9,6 +9,8 @@
 
 ## 重建
 
+本功能分支需要先按 `../soundtrack/README.md` 提供三首录音。缺少清单或录音时，构建会在修改现有 APK 前停止。
+
 从游戏目录运行 `bash android/bootstrap-toolchain.sh` 下载编译工具，再运行 `bash android/build.sh`。构建依赖为 Java 21、keytool、Python 3、curl、unzip、Android Build Tools 35.0.0、Android SDK Platform 35 和 Eclipse ECJ 3.39.0。默认工具目录为游戏目录下的 `.toolchain/`；可用 `JUNGLE_TOOLCHAIN` 更改。工具下载保留系统 HTTPS 代理与证书配置。
 
 目录布局：

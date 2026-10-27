@@ -1,0 +1,17 @@
+{
+  "jungle": {
+    "file": "jungle.mp3",
+    "name": "密林の戦い（メインBGM）",
+    "mimeType": "audio/mpeg"
+  },
+  "base": {
+    "file": "base.mp3",
+    "name": "迷路要塞1（3D）",
+    "mimeType": "audio/mpeg"
+  },
+  "baseBoss": {
+    "file": "base-boss.mp3",
+    "name": "迷路要塞2（3Dボス）",
+    "mimeType": "audio/mpeg"
+  }
+}

@@ -21,7 +21,7 @@
       <div class="level-select" role="group" aria-label="选择起始关卡"><button data-level="1" class="selected">01 <b>丛林前线</b></button><button data-level="2">02 <b>基地渗透</b></button></div>
       <div class="difficulty" role="group" aria-label="难度选择"><button class="selected" data-mode="classic">经典模式 <small>3 条生命</small></button><button data-mode="practice">练习模式 <small>8 条生命</small></button></div>
       <div class="actions"><button id="start" class="primary">开始行动 <span>→</span></button><button id="help" class="secondary">操作指南</button><button id="music-settings" class="secondary">音乐</button></div>
-      <div class="menu-foot">双关卡战役 <b>•</b> 分场景原声导入 <b>•</b> v1.2</div>
+      <div class="menu-foot">双关卡战役 <b>•</b> 场景配乐自动切换 <b>•</b> v1.2</div>
     </div>
     <div class="mission"><span>MISSION</span><strong id="mission-index">01</strong><div id="mission-name">丛林前线</div><small id="mission-english">JUNGLE FRONTLINE</small></div>
     <div class="level-route" id="level-route"><span class="route-point"></span><b>丛林入口</b><i></i><span>爆破木桥</span><i></i><span>基地核心</span><em>STAGE 01 / 02</em></div>
@@ -41,8 +41,7 @@
     <button id="fire" class="control" aria-label="射击"><b>B</b><small>射击</small></button>
   </section>
   <section id="dialog" class="screen modal" hidden><div class="modal-shade"></div><div class="dialog-card" id="dialog-card"></div></section>
-  <input id="music-file" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" hidden aria-label="选择本地背景音乐">
   <div id="rotate" hidden><b>↻</b><strong>横屏，开始行动</strong><span>请将手机横过来，获得更好的操作体验</span></div>
 </main>
-<script src="engine.js"></script><script src="base-engine.js"></script><script src="campaign.js"></script><script src="renderer.js"></script><script src="base-renderer.js"></script><script src="audio.js"></script><script src="app.js"></script>
+<script src="engine.js"></script><script src="base-engine.js"></script><script src="campaign.js"></script><script src="renderer.js"></script><script src="base-renderer.js"></script><script src="bundled-music.js"></script><script src="audio.js"></script><script src="app.js"></script>
 </body></html>

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../web');
-const dist = path.resolve(__dirname, '../dist');
+const dist = fs.mkdtempSync(require('os').tmpdir() + '/jungle-bundled-smoke-');
 
 // Locally generated fixture: the tests do not bundle a third-party recording.
 function sampleWav() {
@@ -19,7 +19,10 @@ function sampleWav() {
 }
 
 (async () => {
+  const bytes = sampleWav();
+  const bundled = Object.fromEntries(['jungle','base','baseBoss'].map(key=>[key,{name:'Fixture '+key,mimeType:'audio/wav',base64:bytes.toString('base64'),sha256:require('crypto').createHash('sha256').update(bytes).digest('hex')}]));
   const server = http.createServer((q, r) => {
+    if(q.url==='/bundled-music.js'){r.setHeader('Content-Type','application/javascript');r.end('window.BUNDLED_SOUNDTRACK='+JSON.stringify(bundled)+';');return;}
     const file = path.join(root, q.url === '/' ? 'index.html' : q.url.split('?')[0]);
     fs.readFile(file, (error, data) => {
       if (error) { r.writeHead(404); r.end(); return; }
@@ -51,49 +54,40 @@ function sampleWav() {
       });
     });
     const waitMusic = text => p.waitForFunction(expected => document.querySelector('#music-current-name')?.textContent.includes(expected), text);
-    const waitFeedback = text => p.waitForFunction(expected => document.querySelector('.music-feedback')?.textContent.includes(expected), text);
     const snapshot = name => p.screenshot({path: path.join(dist, name)});
     const musicTrack = () => p.evaluate(() => __smokeAudio.getMusicStatus().currentTrack);
-    const importAudio = async name => {
-      await p.setInputFiles('#music-file', {name, mimeType: 'audio/wav', buffer: sampleWav()});
-      await waitFeedback('导入成功');
-      assert.equal(await p.locator('#music-current-name').innerText(), name);
-    };
-
     await p.goto('http://127.0.0.1:8765');
     await p.waitForFunction(() => window.game && game.state === 'menu');
     await p.click('#help');
     assert.match(await p.locator('#dialog-card').innerText(), /八向方向盘/);
     await p.click('[data-action="helpClose"]');
 
+    await p.evaluate(() => gameAudio.ready);
+    assert.equal(await p.locator('#music-file').count(),0,'there is no manual import flow');
     await p.click('#music-settings');
-    await waitMusic('仅播放游戏音效');
-    await importAudio('local-<test>.wav');
-    await p.setInputFiles('#music-file', {name: 'invalid.wav', mimeType: 'audio/wav', buffer: Buffer.from('not an audio file')});
-    await waitFeedback('无法解码');
-    assert.equal(await p.locator('#music-current-name').innerText(), 'local-<test>.wav');
-    await p.click('[data-music-track="base"]');
-    await waitMusic('未导入');
-    await importAudio('base-corridor-test.wav');
-    await p.click('[data-music-track="baseBoss"]');
-    await waitMusic('未导入');
-    await importAudio('base-boss-test.wav');
+    await waitMusic('Fixture jungle');
+    assert.match(await p.locator('#dialog-card').innerText(),/内置配乐/);
+    for(const key of ['base','baseBoss','jungle']){
+      await p.click('[data-music-track="'+key+'"]');
+      await waitMusic('Fixture '+key);
+    }
     await snapshot('music.png');
-    await p.reload();
-    await p.click('#music-settings');
-    await waitMusic('local-<test>.wav');
-    await p.click('[data-action="musicClear"]');
-    await waitMusic('未导入');
-    await p.click('[data-music-track="base"]');
-    await waitMusic('base-corridor-test.wav');
+    await p.click('[data-action="musicToggle"]');
+    assert.equal(await p.evaluate(()=>gameAudio.muted),true);
+    await p.click('[data-action="musicToggle"]');
+    assert.equal(await p.evaluate(()=>gameAudio.muted),false);
     await p.click('[data-action="musicClose"]');
+    await p.reload();
+    await p.evaluate(()=>gameAudio.ready);
+    assert.equal(await p.evaluate(()=>gameAudio.getMusicStatus().source),'bundled');
     await snapshot('title.png');
 
     await p.click('#start');
     await p.waitForFunction(() => game.state === 'playing');
     assert.equal(await p.evaluate(() => game.levelNumber), 1);
     assert.equal(await musicTrack(), 'jungle');
-    assert.equal(await p.evaluate(() => __smokeAudio.getMusicStatus().source), 'none', 'cleared jungle slot must not play another stage song');
+    assert.equal(await p.evaluate(() => __smokeAudio.getMusicStatus().source), 'bundled');
+    assert.equal(await p.evaluate(()=>gameAudio._musicSource?.loop),true,'fresh install starts music after Start without importing');
 
     const points = await p.evaluate(() => ['dpad', 'fire', 'jump'].map((id, i) => {
       const r = document.getElementById(id).getBoundingClientRect();
@@ -152,7 +146,7 @@ function sampleWav() {
     assert.deepEqual(await p.evaluate(() => ({lives: game.lives, score: game.score, weapon: game.player.weapon})), {lives: carry.lives, score: carry.score, weapon: carry.weapon});
     assert.ok(await p.evaluate(() => game.elapsed) >= carry.elapsed);
     await p.waitForFunction(() => __smokeAudio.getMusicStatus().currentTrack === 'base');
-    assert.equal(await p.evaluate(() => __smokeAudio.getMusicStatus().name), 'base-corridor-test.wav');
+    assert.equal(await p.evaluate(() => __smokeAudio.getMusicStatus().name), 'Fixture base');
     await p.waitForFunction(() => document.querySelector('#sector').textContent.startsWith('02'));
     assert.match(await p.locator('#sector').innerText(), /02|第二关|基地/);
     await p.evaluate(() => { game.player.invuln = 0; });
@@ -205,7 +199,7 @@ function sampleWav() {
       await p.keyboard.up('ArrowUp');
     }
     await p.waitForFunction(() => __smokeAudio.getMusicStatus().currentTrack === 'baseBoss');
-    assert.equal(await p.evaluate(() => __smokeAudio.getMusicStatus().name), 'base-boss-test.wav');
+    assert.equal(await p.evaluate(() => __smokeAudio.getMusicStatus().name), 'Fixture baseBoss');
     assert.equal(await p.evaluate(() => game.boss.phase), 1);
     await p.locator('#bossbar').waitFor({state: 'visible'});
     assert.equal(await p.locator('#bossbar').isVisible(), true);
@@ -235,17 +229,16 @@ function sampleWav() {
     assert.equal(await p.evaluate(() => game.lives), 3);
     await p.click('#pause');
     await p.click('[data-action="music"]');
-    await waitMusic('base-corridor-test.wav');
-    await p.click('[data-action="musicClear"]');
-    await waitMusic('未导入');
+    await waitMusic('Fixture base');
+    assert.equal(await p.locator('[data-action="musicChoose"]').count(),0);
+    assert.equal(await p.locator('[data-action="musicClear"]').count(),0);
     await p.click('[data-music-track="baseBoss"]');
-    await waitMusic('base-boss-test.wav');
-    await p.click('[data-action="musicClear"]');
-    await waitMusic('未导入');
+    await waitMusic('Fixture baseBoss');
     await p.click('[data-action="musicClose"]');
     await p.click('[data-action="resume"]');
     assert.deepEqual(errors, []);
-    console.log('PASS: menus/help; real WAV import, invalid rollback and persisted independent music slots; multi-touch/release; pause/native lifecycle; screen ratios; first-stage boss damage; stage-clear carry into Base; nonlethal electric stun; real door shooting and up-control traversal of all five Base rooms; room continue; two-phase Base boss; automatic corridor/boss music; final victory; direct stage selection; no JavaScript errors.');
+    console.log('Test-only fixture screenshots: '+dist);
+    console.log('PASS: menus/help; real packaged WAV decoding, fresh-install automatic playback without import controls; multi-touch/release; pause/native lifecycle; screen ratios; first-stage boss damage; stage-clear carry into Base; nonlethal electric stun; real door shooting and up-control traversal of all five Base rooms; room continue; two-phase Base boss; automatic corridor/boss music; final victory; direct stage selection; no JavaScript errors.');
   } finally {
     if (browser) await browser.close();
     server.close();

@@ -1,11 +1,11 @@
-/* Synthesized effects and optional user-supplied local background music. */
+/* Synthesized effects and packaged soundtrack. Imported files remain backups. */
 (() => {
   'use strict';
   const midi = n => 440 * Math.pow(2, (n - 69) / 12);
   const MUSIC_KEYS = ['jungle', 'base', 'baseBoss'];
 
   class GameAudio {
-    constructor() {
+    constructor({allowImportedFallback = false} = {}) {
       this.ctx = null;
       this.muted = false;
       this.paused = false;
@@ -16,9 +16,16 @@
       this.step = 0;
       this.timer = null;
       this.track = 'jungle';
+      // Production uses packaged music only. The explicit opt-in preserves old
+      // import integrations/tests without disguising them as the bundled score.
+      this.allowImportedFallback = !!allowImportedFallback;
+      this._bundledManifest = window.BUNDLED_SOUNDTRACK || {};
       this._musicSlots = Object.fromEntries(MUSIC_KEYS.map(key => [key, {
         buffer: null, name: '', error: '', ready: false, persisted: false,
-        importing: false, revision: 0, restoreBlocked: false
+        importing: false, revision: 0, restoreBlocked: false,
+        bundledBuffer: null, bundledName: '', bundledError: '', bundledReady: false,
+        bundledPresent: Object.prototype.hasOwnProperty.call(this._bundledManifest, key),
+        sha256: '', mimeType: ''
       }]));
       this.musicReady = false;
       this._musicSource = null;
@@ -28,8 +35,18 @@
       this._storageQueue = Promise.resolve();
       this._dbPromise = null;
       this._resumePromise = null;
-      // Restoring a file never starts playback without a later user gesture.
-      this.ready = this._restoreImportedMusic();
+      this._decodeQueue = [];
+      this._decoding = 0;
+      // A fresh installation never depends on IndexedDB or the import workflow.
+      // Loading/decoding music does not start it before a user gesture.
+      const bundledReady = this._restoreBundledMusic();
+      const importedReady = this.allowImportedFallback ? this._restoreImportedMusic() : Promise.resolve();
+      this.ready = Promise.all([bundledReady, importedReady]).then(() => {
+        this.musicReady = true;
+        this._syncMusicPlayback();
+        this._notifyMusicChange();
+        return this.getMusicStatus();
+      });
     }
 
     _ensureContext() {
@@ -132,6 +149,13 @@
     get musicPersisted() { return this._musicSlots[this.track].persisted; }
     get importing() { return this._musicSlots[this.track].importing; }
 
+    _playableMusic(key = this.track) {
+      const slot = this._getMusicSlot(key);
+      if (slot.bundledBuffer) return {buffer: slot.bundledBuffer, name: slot.bundledName, source: 'bundled'};
+      if (this.allowImportedFallback && !slot.bundledPresent && slot.buffer) return {buffer: slot.buffer, name: slot.name, source: 'imported'};
+      return null;
+    }
+
     _getMusicSlot(key) {
       if (!MUSIC_KEYS.includes(key)) throw new Error('未知的音乐槽');
       return this._musicSlots[key];
@@ -143,6 +167,7 @@
       // Stop while the old track is still selected, so elapsed time uses its buffer.
       this._stopImported(true);
       this.track = key;
+      this._drainDecodeQueue();
       this._syncMusicPlayback();
       this._notifyMusicChange(key);
       return this.getMusicStatus();
@@ -150,15 +175,20 @@
 
     getMusicStatus(key = this.track) {
       const slot = this._getMusicSlot(key);
+      const music = this._playableMusic(key);
+      const missing = !slot.bundledPresent && !this.allowImportedFallback ? '缺少内置音频' : '';
       return {
         key,
         currentTrack: this.track,
-        source: slot.buffer ? 'imported' : 'none',
-        name: slot.name,
-        error: slot.error,
-        ready: slot.ready,
-        persisted: slot.persisted,
-        importing: slot.importing
+        source: music ? music.source : 'none',
+        name: music ? music.name : slot.bundledName,
+        error: slot.bundledError || missing || slot.error,
+        ready: slot.bundledReady && (!this.allowImportedFallback || slot.ready),
+        persisted: music && music.source === 'bundled' ? true : slot.persisted,
+        importing: slot.importing,
+        sha256: slot.sha256,
+        mimeType: slot.mimeType,
+        hasImportedBackup: !!slot.buffer || slot.persisted
       };
     }
 
@@ -233,11 +263,35 @@
       });
     }
 
-    async _decodeMusic(blob) {
+    _enqueueDecode(key, run) {
+      return new Promise((resolve, reject) => {
+        this._decodeQueue.push({key, run, resolve, reject});
+        this._drainDecodeQueue();
+      });
+    }
+
+    _drainDecodeQueue() {
+      // At most two compressed files/decoded buffers are in flight. A queued
+      // current-stage track moves ahead of background work on stage changes.
+      while (this._decoding < 2 && this._decodeQueue.length) {
+        const preferred = this._decodeQueue.findIndex(job => job.key === this.track);
+        const job = this._decodeQueue.splice(preferred < 0 ? 0 : preferred, 1)[0];
+        this._decoding++;
+        Promise.resolve().then(job.run).then(job.resolve, job.reject).finally(() => {
+          this._decoding--;
+          this._drainDecodeQueue();
+        });
+      }
+    }
+
+    async _decodeMusic(blob, key) {
       if (!blob || !Number.isFinite(blob.size) || blob.size <= 0) throw new Error('请选择有效的音频文件');
       if (blob.size > 20 * 1024 * 1024) throw new Error('音频文件不能超过 20 MB');
+      return this._enqueueDecode(key, async () => this._decodeAudioBytes(await this._fileBytes(blob)));
+    }
+
+    async _decodeAudioBytes(bytes) {
       if (!this._ensureContext()) throw new Error('当前设备不支持音频播放');
-      const bytes = await this._fileBytes(blob);
       let buffer;
       try {
         buffer = await new Promise((resolve, reject) => {
@@ -253,9 +307,65 @@
       return buffer;
     }
 
+    _bundledBytes(entry) {
+      const encoded = entry && entry.base64;
+      if (typeof encoded !== 'string' || !encoded.length || encoded.length % 4 ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error('内置音频编码无效');
+      const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+      const size = encoded.length / 4 * 3 - padding;
+      if (!size || size > 20 * 1024 * 1024) throw new Error('内置音频大小无效');
+      const bytes = new Uint8Array(size);
+      // Decode small chunks instead of allocating another full binary string.
+      let position = 0;
+      for (let offset = 0; offset < encoded.length; offset += 32768) {
+        const chunk = window.atob(encoded.slice(offset, offset + 32768));
+        for (let i = 0; i < chunk.length; i++) bytes[position++] = chunk.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    async _restoreBundledMusic() {
+      await Promise.all(MUSIC_KEYS.map(key => this._restoreBundledSlot(key)));
+    }
+
+    async _restoreBundledSlot(key) {
+      const slot = this._getMusicSlot(key);
+      try {
+        if (!slot.bundledPresent) {
+          if (!this.allowImportedFallback) slot.bundledError = '缺少内置音频';
+          return;
+        }
+        const entry = this._bundledManifest[key];
+        if (!entry || typeof entry.name !== 'string' || !entry.name.trim() ||
+            typeof entry.mimeType !== 'string' || !entry.mimeType.startsWith('audio/') ||
+            typeof entry.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(entry.sha256)) {
+          throw new Error('内置音频信息无效');
+        }
+        slot.bundledName = entry.name;
+        slot.mimeType = entry.mimeType;
+        slot.sha256 = entry.sha256.toLowerCase();
+        slot.bundledBuffer = await this._enqueueDecode(key, async () => {
+          const bytes = this._bundledBytes(entry);
+          // Packaged APKs are signed; when Web Crypto is available, also check
+          // the generated per-file digest before handing bytes to the decoder.
+          if (window.crypto && window.crypto.subtle) {
+            const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+            const actual = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+            if (actual !== slot.sha256) throw new Error('内置音频校验失败');
+          }
+          return this._decodeAudioBytes(bytes);
+        });
+      } catch (error) {
+        slot.bundledError = '内置音频加载失败：' + (error.message || '无法读取');
+      } finally {
+        slot.bundledReady = true;
+        if (key === this.track) this._syncMusicPlayback();
+        this._notifyMusicChange(key);
+      }
+    }
+
     async _restoreImportedMusic() {
       await Promise.all(MUSIC_KEYS.map(key => this._restoreMusicSlot(key)));
-      this.musicReady = true;
       return this.getMusicStatus();
     }
 
@@ -263,10 +373,13 @@
       const slot = this._getMusicSlot(key);
       let foundRecord = false;
       try {
+        // Leave legacy records untouched on disk; they cannot replace a
+        // packaged soundtrack and need not consume another decoded buffer.
+        if (slot.bundledPresent) return;
         const record = await this._readMusicRecord(key);
         foundRecord = !!record;
         if (record && !slot.restoreBlocked) {
-          const buffer = await this._decodeMusic(record.blob);
+          const buffer = await this._decodeMusic(record.blob, key);
           if (!slot.restoreBlocked) {
             slot.buffer = buffer;
             slot.name = record.name || '本地音乐';
@@ -295,15 +408,16 @@
         await this.ready;
         if (revision !== slot.revision) throw new Error('此导入已取消');
         // Validate fully before touching the currently selected or playing music.
-        const buffer = await this._decodeMusic(file);
+        const buffer = await this._decodeMusic(file, key);
         if (revision !== slot.revision) throw new Error('此导入已取消');
         const name = String(file.name || '本地音乐').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120) || '本地音乐';
-        if (key === this.track) this._stopImported(true);
+        const replacesPlayback = key === this.track && this.allowImportedFallback && !slot.bundledPresent;
+        if (replacesPlayback) this._stopImported(true);
         slot.buffer = buffer;
         slot.name = name;
         slot.error = '';
         slot.persisted = false;
-        if (key === this.track) this._syncMusicPlayback();
+        if (replacesPlayback) this._syncMusicPlayback();
         try {
           const saved = await this._persistMusic({blob: file, name}, key, revision);
           if (revision === slot.revision) slot.persisted = saved;
@@ -328,13 +442,14 @@
       const slot = this._getMusicSlot(key);
       const revision = ++slot.revision;
       slot.restoreBlocked = true;
-      if (key === this.track) this._stopImported(true);
+      const replacesPlayback = key === this.track && this.allowImportedFallback && !slot.bundledPresent;
+      if (replacesPlayback) this._stopImported(true);
       slot.buffer = null;
       slot.name = '';
       slot.error = '';
       slot.persisted = false;
       slot.importing = false;
-      if (key === this.track) this._syncMusicPlayback();
+      if (replacesPlayback) this._syncMusicPlayback();
       this._notifyMusicChange(key);
       await this.ready;
       try {
@@ -348,8 +463,8 @@
 
     _stopImported(resetPosition = false) {
       if (this._musicSource) {
-        if (this.importedBuffer && this.ctx) {
-          this._musicOffset = (this._musicOffset + Math.max(0, this.ctx.currentTime - this._musicStartedAt)) % this.importedBuffer.duration;
+        if (this._musicSource.buffer && this.ctx) {
+          this._musicOffset = (this._musicOffset + Math.max(0, this.ctx.currentTime - this._musicStartedAt)) % this._musicSource.buffer.duration;
         }
         this._musicSource.onended = null;
         try { this._musicSource.stop(); } catch (_) {}
@@ -362,7 +477,8 @@
     }
 
     _syncMusicPlayback() {
-      if (!this.importedBuffer) {
+      const music = this._playableMusic();
+      if (!music) {
         this._stopImported(true);
         return;
       }
@@ -372,10 +488,11 @@
         this._stopImported(false);
         return;
       }
-      if (this._musicSource) return;
+      if (this._musicSource && this._musicSource.buffer === music.buffer) return;
+      if (this._musicSource) this._stopImported(true);
       const source = this.ctx.createBufferSource();
       const gain = this.ctx.createGain();
-      source.buffer = this.importedBuffer;
+      source.buffer = music.buffer;
       source.loop = true;
       gain.gain.value = 0.38;
       source.connect(gain);
@@ -383,7 +500,7 @@
       this._musicSource = source;
       this._musicGain = gain;
       this._musicStartedAt = this.ctx.currentTime;
-      source.start(this._musicStartedAt, this._musicOffset % this.importedBuffer.duration);
+      source.start(this._musicStartedAt, this._musicOffset % music.buffer.duration);
     }
 
     _track(node, gain, filter) {

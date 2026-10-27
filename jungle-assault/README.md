@@ -1,5 +1,7 @@
 # 丛林突击 · 双关卡战役 v1.2
 
+> 此功能分支改为内置配乐，正在等待三首源录音；当前没有可交付的含原声新 APK。已有 `dist/` 安装包仍对应发布标签 v1.2。
+
 Android 单人横屏跑跳射击游戏，按 FC／NES《魂斗罗》前两关的主要元素制作。第一关为横向丛林，第二关为纵深基地。画面、关卡数据与合成音效由本项目实现。
 
 ## 安装与开始
@@ -48,7 +50,7 @@ Android 单人横屏跑跳射击游戏，按 FC／NES《魂斗罗》前两关的
 
 ## FC／NES 原声音乐
 
-三个场景可分别导入本机音频，进入场景时自动切换：
+内置播放对应三个场景，进入场景时自动切换：
 
 | 场景 | 原版曲目 | 试听来源 |
 | --- | --- | --- |
@@ -58,9 +60,11 @@ Android 单人横屏跑跳射击游戏，按 FC／NES《魂斗罗》前两关的
 
 上述曲目收录于 Konami Kukeiha Club 的[《魂斗羅 サウンドトラック（FC版）》](https://open.spotify.com/album/5Wxa96cS7EhTGyFaTYciLf)。第二关走廊发行版约 1:42，Boss 约 1:22。
 
-APK 不内置原版音频文件。未导入对应场景音乐时仅播放游戏音效，不会误用其他场景配乐。在标题或暂停菜单选择「音乐」，选中「01 丛林」「02 走廊」或「02 Boss」，再选择本地音频。
+本分支已移除游戏内导入入口。配乐将由构建流程直接嵌入安装包，首次安装即可离线循环播放，不依赖联网或 IndexedDB。暂停、静音和场景切换分别处理；旧自定义录音不会覆盖内置曲。
 
-支持设备可解码的 MP3、WAV、OGG、M4A 等格式，每首不超过 20 MB；文件保存在本机，下次打开自动恢复。循环播放、静音、暂停恢复及各槽清除独立处理。无效文件不会覆盖已导入音乐。v1.1 的已导入音乐会保留在第一关槽中。
+**当前仍缺少三段原声音频文件。** 已找到官方试听与发行页面，尚未取得可用于本项目内置的录音；没有下载第三方转载、使用测试音频替代原曲或发布新安装包。开发占位清单为空时会明确显示缺少内置音频，正式构建会停止，不会覆盖原有 APK。
+
+音频到位后的打包输入见 [soundtrack/README.md](soundtrack/README.md)。播放器使用生成的本地脚本加载音频，无需放开 Android WebView 对跨文件请求或网络的限制。
 
 ## 构建与预览
 
@@ -71,7 +75,7 @@ bash android/bootstrap-toolchain.sh
 bash android/build.sh
 ```
 
-首次下载 Android SDK Platform 35、Build Tools 35 与 ECJ 编译器。工具默认保存在 `.toolchain/`，可用 `JUNGLE_TOOLCHAIN` 更改。仓库不包含工具缓存、编译中间文件和签名密钥。首次本地构建会生成 `android/local-test.keystore`，密码为 `android`；请保留它以签署后续本地更新。自行生成的密钥与仓库 APK 不同，替换安装可能需要先卸载。
+构建前先按 `soundtrack/README.md` 准备三首音频和清单；缺少任何一首会在编译前停止，保留现有安装包。首次下载 Android SDK Platform 35、Build Tools 35 与 ECJ 编译器。工具默认保存在 `.toolchain/`，可用 `JUNGLE_TOOLCHAIN` 更改。仓库不包含工具缓存、编译中间文件和签名密钥。首次本地构建会生成 `android/local-test.keystore`，密码为 `android`；请保留它以签署后续本地更新。自行生成的密钥与仓库 APK 不同，替换安装可能需要先卸载。
 
 浏览器预览：
 
@@ -86,6 +90,7 @@ node tests/engine.test.cjs
 node tests/base.test.cjs
 node tests/campaign.test.cjs
 node tests/audio.test.cjs
+python3 tests/bundle_music_test.py
 ```
 
 浏览器流程测试另需 Playwright 和 Chromium：
@@ -99,9 +104,9 @@ CHROMIUM_PATH=/path/to/chromium node tests/browser-smoke.cjs
 
 ## 验证范围
 
-玩法测试覆盖两关的射击与受击、电网、过门、蹲伏、滚雷、补给、死亡/续关、双阶段 Boss，以及跨关生命/武器/分数继承。音频测试覆盖三槽保存恢复、旧数据兼容、切换、静音/暂停、无效文件回滚与异步竞态。
+玩法测试覆盖两关的射击与受击、电网、过门、蹲伏、滚雷、补给、死亡/续关、双阶段 Boss，以及跨关生命/武器/分数继承。音频测试覆盖内置曲校验加载、首次安装自动播放、并发解码限制、场景切换、静音/暂停及损坏隔离，并保留显式兼容模式的旧导入回归；打包测试检查缺曲阻断、文件范围、大小/容器、Base64 与哈希一致及旧产物保留。
 
-浏览器测试覆盖实际 WAV 解码、三指操作、不同屏幕比例、关卡选择、第一关结算进入第二关、走廊过门、续关、关底两阶段及音乐自动切换。安装包检查包括编译、DEX、APK v2/v3 签名、zipalign、版本信息及内置资源一致性。具体结果见 [build-report.json](dist/build-report.json)。
+浏览器测试以临时生成的原创 WAV 作为测试资源，验证新安装无需导入即可自动播放、没有导入入口，以及三指操作、不同屏幕比例、关卡选择、跨关、走廊过门、续关、关底两阶段和音乐切换。测试资源和截图只写临时目录，不代表真实原曲。安装包检查包括编译、DEX、APK v2/v3 签名、zipalign、版本信息及内置资源一致性。具体结果见 [build-report.json](dist/build-report.json)。
 
 当前环境没有 Android 真机或模拟器，尚未进行安卓设备实测。
 
