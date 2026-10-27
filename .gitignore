@@ -18,3 +18,13 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Soundtrack inputs are supplied separately; retain only the example and guide.
+jungle-assault/soundtrack/manifest.json
+jungle-assault/soundtrack/*.mp3
+jungle-assault/soundtrack/*.wav
+jungle-assault/soundtrack/*.ogg
+jungle-assault/soundtrack/*.m4a
+jungle-assault/soundtrack/*.flac
+jungle-assault/soundtrack/*.aac
+__pycache__/

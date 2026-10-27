@@ -5,7 +5,7 @@ const audio=new GameAudio(),g=new CampaignGame(name=>audio.sfx(name));
 const renderer=new GameRenderer($('game')),baseRenderer=new BaseRenderer($('game'));
 window.game=g;window.gameAudio=audio;
 let mode='classic',selectedLevel=1,muted=false,previousState='',last=0,acc=0,frame=0,lastTrack='';
-let musicDialogOpen=false,musicBusy=false,musicFeedback='',musicSelection='jungle';
+let musicDialogOpen=false,musicSelection='jungle';
 const keys=new Set(),pointers=new Map();let pad={x:0,y:0},jumpQueued=false,fireHeld=false;
 const names={R:'突击步枪',M:'高速机枪',S:'五向散弹',L:'穿透激光'};
 const musicTracks={
@@ -36,25 +36,19 @@ $('start').onclick=()=>start();
 document.querySelectorAll('[data-level]').forEach(b=>b.onclick=()=>{selectedLevel=Number(b.dataset.level);g.reset(mode,selectedLevel);g.state='menu';syncTrack();refreshMenu();});
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(a=>a.classList.toggle('selected',a===b));});
 function dialog(html){$('dialog-card').innerHTML=html;$('dialog').hidden=false;document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>actions[b.dataset.action]());}
-function openMusic(){musicSelection=trackForGame();musicFeedback='';audio.unlock();musicDialog();}
+function openMusic(){musicSelection=trackForGame();audio.unlock();musicDialog();}
 function musicDialog(){
   musicDialogOpen=true;const status=audio.getMusicStatus(musicSelection),info=musicTracks[musicSelection];
-  const tabs=Object.entries(musicTracks).map(([key,v])=>'<button data-music-track="'+key+'" class="'+(key===musicSelection?'selected':'')+'" '+(musicBusy?'disabled':'')+'>'+v.label+'</button>').join('');
-  dialog('<div class="dialog-kicker">FC / NES · SOUNDTRACK</div><h2>原声音乐</h2><div class="music-tabs">'+tabs+'</div><p class="music-title">'+escapeHTML(info.title)+'</p><p class="music-title">为所选场景导入本地音频，进入该场景时自动切换并循环播放。</p><div class="music-current"><small>当前场景音乐</small><b id="music-current-name">'+escapeHTML(status.source==='imported'?status.name:'未导入 · 仅播放游戏音效')+'</b></div><p class="music-feedback" role="status">'+escapeHTML(musicFeedback||status.error||'支持 MP3、WAV、OGG、M4A 等可播放音频，每首不超过 20 MB。')+'</p><div class="dialog-buttons"><button class="primary" data-action="musicChoose" '+(musicBusy?'disabled':'')+'>'+(musicBusy?'正在导入…':'选择本地音频')+' <span>♫</span></button>'+(status.source==='imported'?'<button class="secondary" data-action="musicClear" '+(musicBusy?'disabled':'')+'>清除本首</button>':'')+'<button class="secondary" data-action="musicClose" '+(musicBusy?'disabled':'')+'>返回</button></div>');
-  document.querySelectorAll('[data-music-track]').forEach(b=>b.onclick=()=>{musicSelection=b.dataset.musicTrack;musicFeedback='';musicDialog();});
+  const tabs=Object.entries(musicTracks).map(([key,v])=>'<button data-music-track="'+key+'" class="'+(key===musicSelection?'selected':'')+'">'+v.label+'</button>').join('');
+  const current=status.source==='bundled'?'内置原声 · '+status.name:status.ready?'内置音频未就绪':'正在加载内置音频…';
+  const feedback=status.error||'配乐随游戏离线播放，进入场景自动切换，无需导入文件。';
+  dialog('<div class="dialog-kicker">FC / NES · SOUNDTRACK</div><h2>内置配乐</h2><div class="music-tabs">'+tabs+'</div><p class="music-title">'+escapeHTML(info.title)+'</p><p class="music-title">安装包内置音乐，关卡与 Boss 配乐自动切换并循环播放。</p><div class="music-current"><small>当前场景音乐</small><b id="music-current-name">'+escapeHTML(current)+'</b></div><p class="music-feedback" role="status">'+escapeHTML(feedback)+'</p><div class="dialog-buttons"><button class="primary" data-action="musicToggle">'+(muted?'开启声音':'静音')+' <span>♫</span></button><button class="secondary" data-action="musicClose">返回</button></div>');
+  document.querySelectorAll('[data-music-track]').forEach(b=>b.onclick=()=>{musicSelection=b.dataset.musicTrack;musicDialog();});
 }
 $('music-settings').onclick=openMusic;
-$('music-file').addEventListener('change',async e=>{
-  const file=e.target.files&&e.target.files[0];if(!file)return;const track=musicSelection;
-  musicBusy=true;musicFeedback='正在读取并保存音频…';musicDialog();
-  try{const status=await audio.importMusic(file,track);musicFeedback=status.error||'导入成功，进入该场景后将自动播放。';}
-  catch(err){musicFeedback=err.message||'无法读取此音频，请换一个文件。';}
-  finally{musicBusy=false;e.target.value='';musicDialog();}
-});
-addEventListener('game-music-change',()=>{if(musicDialogOpen&&!musicBusy)musicDialog();});
+addEventListener('game-music-change',()=>{if(musicDialogOpen)musicDialog();});
 const actions={
-  musicChoose(){audio.unlock();$('music-file').click();},
-  async musicClear(){musicBusy=true;musicFeedback='';musicDialog();try{const status=await audio.clearImportedMusic(musicSelection);musicFeedback=status.error||'已清除此场景配乐，其他场景不受影响。';}catch(e){musicFeedback=e.message||'清除失败，请重试。';}finally{musicBusy=false;musicDialog();}},
+  musicToggle(){mute();musicDialog();},
   musicClose(){musicDialogOpen=false;if(g.state==='paused')pauseDialog();else $('dialog').hidden=true;},
   music:openMusic,
   resume(){g.state='playing';audio.setPaused(false);release();sync();},
@@ -114,7 +108,7 @@ addEventListener('keydown',e=>{if(!gameKeys.includes(e.code))return;e.preventDef
 addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>{if(g.state==='playing')pause();else release();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&g.state==='playing')pause();});
 window.gameLifecycle=function(active){if(!active){if(g.state==='playing')pause();else{release();audio.setPaused(true);}}};
-window.gameBack=function(){if(musicDialogOpen){if(!musicBusy)actions.musicClose();return;}if(g.state==='playing')pause();else if(g.state==='paused')actions.resume();else if(!$('dialog').hidden&&g.state==='menu')$('dialog').hidden=true;else if(g.state!=='menu')actions.menu();};
+window.gameBack=function(){if(musicDialogOpen){actions.musicClose();return;}if(g.state==='playing')pause();else if(g.state==='paused')actions.resume();else if(!$('dialog').hidden&&g.state==='menu')$('dialog').hidden=true;else if(g.state!=='menu')actions.menu();};
 function hud(){
   const p=g.player,base=g.levelNumber===2,b=g.boss;
   $('life').textContent=g.lives<=5?'◆ '.repeat(Math.max(0,g.lives)):'◆ × '+g.lives;$('score').textContent=g.score.toString().padStart(6,'0');$('weapon-code').textContent=p.weapon;$('weapon-name').textContent=names[p.weapon]||p.weapon;

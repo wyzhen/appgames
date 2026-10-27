@@ -9,6 +9,11 @@ BUILD_DIR="$ANDROID_PROJECT/build"
 OUTPUT_DIR="$PROJECT_ROOT/dist"
 APK="$OUTPUT_DIR/JungleAssault.apk"
 LEGACY_APK="$OUTPUT_DIR/JungleAssault-Level1.apk"
+MUSIC_TEMP="$(mktemp -d)"
+trap 'rm -rf "$MUSIC_TEMP"' EXIT
+# Validate all recordings before touching build/ or an existing release APK.
+python3 "$ANDROID_PROJECT/bundle_music.py" \
+    --source-dir "${JUNGLE_SOUNDTRACK_DIR:-$PROJECT_ROOT/soundtrack}" --output "$MUSIC_TEMP/bundled-music.js"
 for required in "$BUILD_TOOLS/aapt2" "$BUILD_TOOLS/zipalign" "$ANDROID_JAR" "$TOOLCHAIN/ecj.jar"; do
     if [ ! -f "$required" ]; then
         echo "Missing build dependency: $required" >&2
@@ -22,6 +27,7 @@ fi
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/classes" "$BUILD_DIR/dex" "$BUILD_DIR/assets/game" "$OUTPUT_DIR"
 cp -R "$PROJECT_ROOT/web/." "$BUILD_DIR/assets/game/"
+cp "$MUSIC_TEMP/bundled-music.js" "$BUILD_DIR/assets/game/bundled-music.js"
 "$BUILD_TOOLS/aapt2" compile --dir "$ANDROID_PROJECT/res" -o "$BUILD_DIR/resources.zip"
 "$BUILD_TOOLS/aapt2" link -I "$ANDROID_JAR" \
     --manifest "$ANDROID_PROJECT/AndroidManifest.xml" \
@@ -51,7 +57,7 @@ java -jar "$BUILD_TOOLS/lib/apksigner.jar" sign \
     "$BUILD_DIR/aligned.apk"
 java -jar "$BUILD_TOOLS/lib/apksigner.jar" verify --verbose "$APK"
 "$BUILD_TOOLS/zipalign" -c -p 4 "$APK"
-python3 - "$APK" "$PROJECT_ROOT/web" <<'PY'
+python3 - "$APK" "$PROJECT_ROOT/web" "$MUSIC_TEMP/bundled-music.js" <<'PY'
 from pathlib import Path
 import sys, zipfile
 web = Path(sys.argv[2])
@@ -59,7 +65,8 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
     files = [p for p in web.rglob('*') if p.is_file()]
     for path in files:
         bundled = 'assets/game/' + path.relative_to(web).as_posix()
-        assert apk.read(bundled) == path.read_bytes(), f'Stale or missing asset: {bundled}'
+        expected = Path(sys.argv[3]).read_bytes() if path.name == 'bundled-music.js' else path.read_bytes()
+        assert apk.read(bundled) == expected, f'Stale or missing asset: {bundled}'
     assert 'classes.dex' in apk.namelist()
     print(f'Verified {len(files)} bundled game assets byte-for-byte.')
 PY

@@ -6,12 +6,15 @@ const vm = require('node:vm');
 
 // These tests control the audio clock and storage to reproduce lifecycle races.
 // The generated fixture is test data, not bundled game music.
-function fixture({ storageFails = false, savedRecord = null, savedRecords = [], suspended = false } = {}) {
+function fixture({ storageFails = false, savedRecord = null, savedRecords = [], suspended = false,
+  allowImportedFallback = true, bundled, noStorage = false, deferDecodes = false } = {}) {
   const records = new Map(savedRecords);
   if (savedRecord) records.set('background', savedRecord);
   const events = [];
   const contexts = [];
   const pendingDecodes = [];
+  const decodeStats = {active: 0, peak: 0, started: []};
+  let storageOpens = 0;
   const param = () => ({ value: 0, cancelScheduledValues() {},
     setValueAtTime(v) { this.value = v; }, linearRampToValueAtTime(v) { this.value = v; },
     exponentialRampToValueAtTime(v) { this.value = v; } });
@@ -34,10 +37,16 @@ function fixture({ storageFails = false, savedRecord = null, savedRecords = [], 
     decodeAudioData(bytes, resolve, reject) {
       const content = Buffer.from(bytes).toString();
       const buffer = {duration: 10, numberOfChannels: 2, content};
-      if (content === 'pending') return new Promise((res, rej) => pendingDecodes.push({resolve: () => {resolve(buffer); res(buffer);}, reject: rej}));
-      if (!content.startsWith('valid')) { const error = new Error('invalid audio'); reject(error); return Promise.reject(error); }
-      resolve(buffer);
-      return Promise.resolve(buffer);
+      decodeStats.active++;
+      decodeStats.peak = Math.max(decodeStats.peak, decodeStats.active);
+      decodeStats.started.push(content);
+      const success = () => {decodeStats.active--; resolve(buffer); return buffer;};
+      const failure = error => {decodeStats.active--; reject(error); return Promise.reject(error);};
+      if (deferDecodes) return new Promise((res, rej) => pendingDecodes.push({content,
+        resolve: () => res(success()), reject: () => {const error = new Error('invalid audio'); decodeStats.active--; reject(error); rej(error);}}));
+      if (content === 'pending') return new Promise((res, rej) => pendingDecodes.push({content, resolve: () => res(success()), reject: rej}));
+      if (!content.startsWith('valid')) return failure(new Error('invalid audio'));
+      return Promise.resolve(success());
     }
   }
   const db = {
@@ -54,12 +63,16 @@ function fixture({ storageFails = false, savedRecord = null, savedRecords = [], 
   };
   const window = {
     AudioContext,
-    indexedDB: {open() { const request = {}; queueMicrotask(() => {request.result = db; request.onsuccess();}); return request; }},
+    BUNDLED_SOUNDTRACK: bundled,
+    atob,
+    crypto: require('node:crypto').webcrypto,
+    indexedDB: noStorage ? undefined : {open() { storageOpens++; const request = {}; queueMicrotask(() => {request.result = db; request.onsuccess();}); return request; }},
     dispatchEvent(event) {events.push(event);}
   };
   const sandbox = {window, CustomEvent: class {constructor(type, options) {this.type = type; this.detail = options.detail;}}, clearInterval, setInterval, FileReader: class {}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../web/audio.js'), 'utf8'), sandbox);
-  return {audio: new window.GameAudio(), GameAudio: window.GameAudio, records, events, contexts, pendingDecodes};
+  class GameAudio extends window.GameAudio { constructor(options = {allowImportedFallback}) { super(options); } }
+  return {audio: new GameAudio(), GameAudio, records, events, contexts, pendingDecodes, decodeStats, get storageOpens() {return storageOpens;}};
 }
 const audioFile = (name = 'stage-one.wav', content = 'valid-test-audio') => new File([content], name, {type: 'audio/wav'});
 const loops = audio => audio.ctx.sources.filter(s => s.loop && !s.stopped);
@@ -379,4 +392,102 @@ test('unknown slot keys are rejected without changing playback selection', async
   await assert.rejects(audio.importMusic(audioFile(), 'unknown'), /未知/);
   await assert.rejects(audio.clearImportedMusic('unknown'), /未知/);
   assert.equal(audio.track, 'jungle');
+});
+
+function bundledFixtures() {
+  const crypto = require('node:crypto');
+  return Object.fromEntries(['jungle', 'base', 'baseBoss'].map(key => {
+    const bytes = Buffer.from('valid-packaged-' + key);
+    return [key, {name: 'Packaged ' + key, mimeType: 'audio/wav',
+      base64: bytes.toString('base64'), sha256: crypto.createHash('sha256').update(bytes).digest('hex')}];
+  }));
+}
+
+test('production defaults require bundled files without reading IndexedDB', async () => {
+  const f = fixture({allowImportedFallback: false, noStorage: true});
+  await f.audio.ready;
+  assert.equal(f.storageOpens, 0);
+  assert.equal(f.audio.getMusicStatus().source, 'none');
+  assert.match(f.audio.getMusicStatus().error, /缺少内置音频/);
+});
+
+test('a fresh installation loads all packaged tracks and switches a single loop without imports', async () => {
+  const f = fixture({allowImportedFallback: false, noStorage: true, bundled: bundledFixtures()});
+  const audio = f.audio;
+  await audio.ready;
+  assert.equal(f.storageOpens, 0);
+  assert.equal(loops(audio).length, 0, 'loading does not autoplay before a gesture');
+  audio.unlock(); audio.start();
+  for (const key of ['jungle', 'base', 'baseBoss', 'jungle']) {
+    audio.setTrack(key);
+    assert.equal(audio.getMusicStatus().source, 'bundled');
+    assert.equal(audio.getMusicStatus().name, 'Packaged ' + key);
+    assert.equal(audio._musicSource.buffer.content, 'valid-packaged-' + key);
+    assert.equal(loops(audio).length, 1);
+    const source = audio._musicSource;
+    for (let i = 0; i < 20; i++) {audio.unlock(); audio.setTrack(key);}
+    assert.equal(audio._musicSource, source);
+  }
+});
+
+test('a broken packaged track is isolated and never silently falls back to imported music', async () => {
+  const bundled = bundledFixtures();
+  bundled.base.sha256 = '0'.repeat(64);
+  const f = fixture({bundled, savedRecords: [['base', {blob: audioFile('old.wav'), name: 'old.wav'}]]});
+  await f.audio.ready;
+  f.audio.unlock(); f.audio.start();
+  assert.equal(f.audio.getMusicStatus().source, 'bundled');
+  f.audio.setTrack('base');
+  assert.equal(f.audio.getMusicStatus().source, 'none');
+  assert.match(f.audio.getMusicStatus().error, /校验失败/);
+  assert.equal(loops(f.audio).length, 0);
+  f.audio.setTrack('baseBoss');
+  assert.equal(f.audio.getMusicStatus().source, 'bundled');
+  assert.equal(loops(f.audio).length, 1);
+  assert.equal(f.records.get('base').name, 'old.wav');
+});
+
+test('packaged music preserves position on pause and mute and resets on a scene change', async () => {
+  const {audio} = fixture({allowImportedFallback: false, bundled: bundledFixtures()});
+  await audio.ready;
+  audio.unlock(); audio.start();
+  audio.ctx.currentTime = 4; audio.setPaused(true);
+  assert.equal(loops(audio).length, 0);
+  audio.ctx.currentTime = 9; audio.setPaused(false);
+  assert.equal(audio._musicSource.starts[0][1], 4);
+  audio.ctx.currentTime = 11; audio.setMuted(true);
+  audio.ctx.currentTime = 20; audio.setMuted(false);
+  assert.equal(audio._musicSource.starts[0][1], 6);
+  audio.setTrack('base');
+  assert.equal(audio._musicSource.starts[0][1], 0);
+  assert.equal(loops(audio).length, 1);
+});
+
+test('legacy import APIs preserve backups without replacing packaged playback', async () => {
+  const {audio, records} = fixture({bundled: bundledFixtures()});
+  await audio.ready;
+  audio.unlock(); audio.start();
+  const source = audio._musicSource;
+  await audio.importMusic(audioFile('custom.wav'));
+  assert.equal(audio._musicSource, source);
+  assert.equal(audio.getMusicStatus().source, 'bundled');
+  assert.equal(records.get('background').name, 'custom.wav');
+  await audio.clearImportedMusic();
+  assert.equal(audio._musicSource, source);
+  assert.equal(audio.getMusicStatus().source, 'bundled');
+});
+
+test('packaged decoding concurrency never exceeds two files', async () => {
+  const f = fixture({allowImportedFallback: false, bundled: bundledFixtures(), deferDecodes: true});
+  for (let i = 0; i < 50 && f.pendingDecodes.length < 2; i++) await tick();
+  assert.equal(f.pendingDecodes.length, 2);
+  assert.equal(f.decodeStats.peak, 2);
+  f.audio.setTrack('baseBoss');
+  f.pendingDecodes.shift().resolve();
+  for (let i = 0; i < 50 && f.pendingDecodes.length < 2; i++) await tick();
+  assert.equal(f.decodeStats.started.length, 3);
+  while (f.pendingDecodes.length) f.pendingDecodes.shift().resolve();
+  await f.audio.ready;
+  assert.equal(f.decodeStats.peak, 2);
+  assert.equal(f.audio.getMusicStatus().source, 'bundled');
 });
